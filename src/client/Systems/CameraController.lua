@@ -34,11 +34,16 @@ function CameraController:Start()
 	self._bodyRadius = Flight:GetBodyRadius()
 
 	local cam = Workspace.CurrentCamera
-	while not cam do
-		task.wait()
+	local waited = 0
+	while not cam and waited < 5 do
+		waited += task.wait()
 		cam = Workspace.CurrentCamera
 	end
 	self._camera = cam
+	if not cam then
+		warn("[CameraController] no CurrentCamera; camera disabled")
+		return
+	end
 	cam.CameraType = Enum.CameraType.Scriptable
 	cam.FieldOfView = Config.CAMERA.fieldOfView
 

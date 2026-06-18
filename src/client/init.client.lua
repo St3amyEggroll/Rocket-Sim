@@ -18,6 +18,7 @@ local Registry = require(Shared:WaitForChild("Registry"))
 local systemsFolder = script:WaitForChild("Systems")
 
 local initOrder = {
+	"DebugController",
 	"FloatingOriginController",
 	"InputController",
 	"FlightController",
@@ -29,7 +30,9 @@ local initOrder = {
 }
 
 -- Listeners must Start before the flight loop begins firing events.
+-- DebugController starts first so its overlay is up even if something else fails.
 local startOrder = {
+	"DebugController",
 	"FloatingOriginController",
 	"InputController",
 	"CraftRenderer",
@@ -47,18 +50,29 @@ for _, name in ipairs(initOrder) do
 	Registry:Register(name, mod)
 end
 
+-- Isolate per-module Init/Start failures so one bad module can't halt the rest.
 for _, name in ipairs(initOrder) do
 	local mod = modules[name]
 	if type(mod.Init) == "function" then
-		mod:Init()
+		local ok, err = pcall(function()
+			mod:Init()
+		end)
+		if not ok then
+			warn(("[RocketSim] %s:Init() failed: %s"):format(name, tostring(err)))
+		end
 	end
 end
 
 for _, name in ipairs(startOrder) do
 	local mod = modules[name]
 	if type(mod.Start) == "function" then
-		mod:Start()
+		local ok, err = pcall(function()
+			mod:Start()
+		end)
+		if not ok then
+			warn(("[RocketSim] %s:Start() failed: %s"):format(name, tostring(err)))
+		end
 	end
 end
 
-print("[RocketSim] Client systems started -- build P2.4 (rocket+planet, cached map, small world).")
+print("[RocketSim] Client systems started -- build P2.5 (diagnostics overlay).")

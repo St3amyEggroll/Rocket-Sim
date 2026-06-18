@@ -50,6 +50,7 @@ function FlightController:Init()
 	self._status = "Coasting"
 	self._powered = false
 	self._landed = false
+	self._updateCount = 0
 
 	-- Per-frame broadcast (created in Init so listeners can connect in Start).
 	self.Updated = Signal.new()
@@ -128,6 +129,7 @@ function FlightController:_step(rawDt)
 	end
 
 	self._powered = powered
+	self._updateCount += 1
 	self._origin:UpdateFor(self._state.position)
 
 	self.Updated:Fire(self._state, {
@@ -157,6 +159,10 @@ end
 
 function FlightController:GetUpdatedSignal()
 	return self.Updated
+end
+
+function FlightController:GetUpdateCount(): number
+	return self._updateCount
 end
 
 function FlightController:GetReadout()

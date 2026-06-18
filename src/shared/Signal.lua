@@ -42,7 +42,12 @@ function Signal:Fire(...)
 	for i = 1, #handlers do
 		local conn = handlers[i]
 		if conn and conn.connected then
-			conn.fn(...)
+			-- Isolate handlers: one erroring listener must not stop the others
+			-- (e.g. a renderer bug must not freeze the camera). Errors are logged.
+			local ok, err = pcall(conn.fn, ...)
+			if not ok then
+				warn("[Signal] handler error: " .. tostring(err))
+			end
 		end
 	end
 end
