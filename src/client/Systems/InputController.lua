@@ -1,15 +1,16 @@
 --[[
 	InputController
-	Owner of: all player input state (throttle, thrust mode, camera orbit).
+	Owner of: all player input state (throttle, thrust mode, time warp, camera
+	orbit, and the map/flight view toggle).
 
-	Other systems read this state at runtime; nobody else touches input. Throttle
-	ramps on a render-step bound at Input priority so it is always up to date
-	before FlightController reads it later in the same frame.
+	Other systems read this state at runtime; nobody else touches input.
 
 	Controls:
 	  Shift / Ctrl ... throttle up / down (hold)
 	  Z / X .......... throttle full / cut
-	  1 2 3 4 ........ thrust direction: Prograde / Retrograde / RadialOut / RadialIn
+	  1 2 3 4 ........ thrust: Prograde / Retrograde / RadialOut / RadialIn
+	  . / , .......... time warp up / down (engine off only)
+	  M .............. toggle Map view / Flight (chase) view
 	  RMB + drag ..... orbit the camera
 	  Mouse wheel .... zoom
 ]]
@@ -26,11 +27,15 @@ local InputController = {}
 function InputController:Init()
 	self._throttle = 0
 	self._thrustMode = "Prograde"
+	self._warpIndex = 1
+	self._warpLevels = Config.TIMEWARP.levels
+	self._mapMode = Config.CAMERA.startInMapView and true or false
 	self._rmbDown = false
 	self._cam = {
-		azimuth = math.rad(35),
-		elevation = math.rad(18),
+		azimuth = Config.CAMERA.defaultAzimuth,
+		elevation = Config.CAMERA.defaultElevation,
 		distance = Config.CAMERA.distanceDefault,
+		mapZoom = 1,
 	}
 end
 
@@ -46,6 +51,7 @@ function InputController:Start()
 			local k = input.KeyCode
 			if k == Enum.KeyCode.Z then
 				self._throttle = 1
+				self._warpIndex = 1
 			elseif k == Enum.KeyCode.X then
 				self._throttle = 0
 			elseif k == Enum.KeyCode.One then
@@ -56,6 +62,15 @@ function InputController:Start()
 				self._thrustMode = "RadialOut"
 			elseif k == Enum.KeyCode.Four then
 				self._thrustMode = "RadialIn"
+			elseif k == Enum.KeyCode.Period then
+				-- Warp up only while coasting.
+				if self._throttle <= 0 then
+					self._warpIndex = math.min(#self._warpLevels, self._warpIndex + 1)
+				end
+			elseif k == Enum.KeyCode.Comma then
+				self._warpIndex = math.max(1, self._warpIndex - 1)
+			elseif k == Enum.KeyCode.M then
+				self._mapMode = not self._mapMode
 			end
 		elseif input.UserInputType == Enum.UserInputType.MouseButton2 then
 			self._rmbDown = true
@@ -82,8 +97,12 @@ function InputController:Start()
 			end
 		elseif input.UserInputType == Enum.UserInputType.MouseWheel and not gameProcessed then
 			local factor = 1 - input.Position.Z * camCfg.zoomSensitivity
-			self._cam.distance =
-				math.clamp(self._cam.distance * factor, camCfg.distanceMin, camCfg.distanceMax)
+			if self._mapMode then
+				self._cam.mapZoom = math.clamp(self._cam.mapZoom * factor, camCfg.mapZoomMin, camCfg.mapZoomMax)
+			else
+				self._cam.distance =
+					math.clamp(self._cam.distance * factor, camCfg.distanceMin, camCfg.distanceMax)
+			end
 		end
 	end)
 
@@ -104,6 +123,11 @@ function InputController:Start()
 		if delta ~= 0 then
 			self._throttle = math.clamp(self._throttle + delta, 0, 1)
 		end
+
+		-- No warp while the engine is firing.
+		if self._throttle > 0 then
+			self._warpIndex = 1
+		end
 	end)
 end
 
@@ -115,7 +139,15 @@ function InputController:GetThrustMode(): string
 	return self._thrustMode
 end
 
--- Returns the live camera orbit table { azimuth, elevation, distance }.
+function InputController:GetTimeWarp(): number
+	return self._warpLevels[self._warpIndex]
+end
+
+function InputController:GetMapMode(): boolean
+	return self._mapMode
+end
+
+-- Live camera orbit table { azimuth, elevation, distance, mapZoom }.
 function InputController:GetCameraOrbit()
 	return self._cam
 end

@@ -2,17 +2,21 @@
 	CameraController
 	Owner of: the Scriptable camera.
 
-	Orbits the camera around the craft's render position using the orbit state
-	owned by InputController. It derives the craft's render position straight from
-	the sim state + floating origin, so it is independent of render ordering and
-	stays glued to the craft through floating-origin rebases (the camera target
-	and every rendered object shift by the same delta, so nothing pops).
+	Two modes (toggle with M, owned by InputController):
+	  * Flight (chase): orbit the camera close around the craft + rider.
+	  * Map: frame the body and pull back to fit the whole orbit, so you can
+	    watch the craft travel around its trajectory (great with time warp).
+
+	Render positions come straight from the sim state + floating origin, so the
+	camera stays glued through floating-origin rebases (everything shifts by the
+	same delta, so nothing pops).
 ]]
 
 local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 
+local Orbit = require(Shared:WaitForChild("OrbitMechanics"))
 local Config = require(Shared:WaitForChild("Config"))
 local Registry = require(Shared:WaitForChild("Registry"))
 
@@ -26,6 +30,8 @@ function CameraController:Start()
 	self._input = Registry:Get("InputController")
 	self._origin = Registry:Get("FloatingOriginController")
 	local Flight = Registry:Get("FlightController")
+	self._mu = Flight:GetMu()
+	self._bodyRadius = Flight:GetBodyRadius()
 
 	local cam = Workspace.CurrentCamera
 	while not cam do
@@ -47,10 +53,12 @@ function CameraController:_update(state)
 	if not cam then
 		return
 	end
+	-- Re-assert in case a (re)spawn handed control back to the default camera.
+	if cam.CameraType ~= Enum.CameraType.Scriptable then
+		cam.CameraType = Enum.CameraType.Scriptable
+	end
 
 	local orbit = self._input:GetCameraOrbit()
-	local target = self._origin:ToRender(state.position)
-
 	local cosE = math.cos(orbit.elevation)
 	local dir = Vector3.new(
 		math.cos(orbit.azimuth) * cosE,
@@ -58,8 +66,22 @@ function CameraController:_update(state)
 		math.sin(orbit.azimuth) * cosE
 	)
 
-	local camPos = target + dir * orbit.distance
-	cam.CFrame = CFrame.lookAt(camPos, target)
+	local target, distance
+	if self._input:GetMapMode() then
+		-- Frame the body; pull back to fit the orbit.
+		target = self._origin:ToRender(Orbit.vec(0, 0, 0))
+		local readout = Orbit.getReadout(state, self._mu)
+		local p = state.position
+		local rNow = math.sqrt(p.x * p.x + p.y * p.y + p.z * p.z)
+		local apoR = (readout.apoapsis < math.huge) and (readout.apoapsis + self._bodyRadius) or rNow
+		local frameR = math.max(apoR, rNow, self._bodyRadius * 1.5)
+		distance = frameR * Config.CAMERA.mapFrameMultiplier * orbit.mapZoom
+	else
+		target = self._origin:ToRender(state.position)
+		distance = orbit.distance
+	end
+
+	cam.CFrame = CFrame.lookAt(target + dir * distance, target)
 end
 
 return CameraController

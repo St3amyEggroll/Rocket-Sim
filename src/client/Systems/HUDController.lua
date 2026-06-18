@@ -3,8 +3,8 @@
 	Owner of: the flight HUD ScreenGui.
 
 	Reads Orbit.getReadout each frame (via FlightController.Updated) and shows the
-	live orbital state plus throttle / thrust mode / status. Pure read-side: it
-	owns no sim state.
+	live orbital state plus throttle / thrust mode / time warp / view / status.
+	Pure read-side: owns no sim state.
 ]]
 
 local Players = game:GetService("Players")
@@ -17,7 +17,6 @@ local Registry = require(Shared:WaitForChild("Registry"))
 
 local HUDController = {}
 
--- Compact number formatting (k / M suffixes; handles infinity & NaN).
 local function fmt(n: number): string
 	if n == math.huge then
 		return "inf"
@@ -90,10 +89,11 @@ function HUDController:Start()
 
 	self:_build(playerGui)
 
-	-- Prime with the current state, then track every frame.
 	self:_update(Flight:GetState(), {
 		throttle = 0,
 		thrustMode = "Prograde",
+		warp = 1,
+		mapMode = Config.CAMERA.startInMapView,
 		status = "Coasting",
 		mu = Flight:GetMu(),
 		bodyRadius = Flight:GetBodyRadius(),
@@ -114,7 +114,6 @@ function HUDController:_build(parent: Instance)
 
 	-- Orbit readout (top-left).
 	local readout = newPanel(gui, 260, Vector2.new(0, 0), UDim2.fromOffset(16, 16))
-
 	local title = newRow(readout, 0, 24, 18)
 	title.Text = "[ " .. Config.BODY.name .. " ]"
 	title.TextColor3 = Color3.fromRGB(120, 200, 255)
@@ -133,19 +132,21 @@ function HUDController:_build(parent: Instance)
 	L.statusMode = newRow(status, 1, 20, 16)
 	L.throttle = newRow(status, 2, 20, 16)
 	L.thrustMode = newRow(status, 3, 20, 16)
+	L.warp = newRow(status, 4, 20, 16)
+	L.view = newRow(status, 5, 20, 16)
 
 	-- Controls hint (bottom-centre).
 	local hint = Instance.new("TextLabel")
 	hint.Name = "Hint"
 	hint.AnchorPoint = Vector2.new(0.5, 1)
 	hint.Position = UDim2.new(0.5, 0, 1, -16)
-	hint.Size = UDim2.fromOffset(980, 22)
+	hint.Size = UDim2.fromOffset(1040, 22)
 	hint.BackgroundTransparency = 1
 	hint.Font = Enum.Font.Code
 	hint.TextSize = 14
 	hint.TextColor3 = Color3.fromRGB(175, 185, 200)
 	hint.Text =
-		"Shift/Ctrl Throttle   Z Full / X Cut   1 Prograde  2 Retrograde  3 RadialOut  4 RadialIn   RMB+Drag Orbit   Wheel Zoom"
+		"Shift/Ctrl Throttle  Z Full / X Cut  1-4 Pro/Retro/RadOut/RadIn  . / , Warp  M Map/Flight  RMB+Drag Orbit  Wheel Zoom"
 	hint.Parent = gui
 end
 
@@ -174,6 +175,8 @@ function HUDController:_update(state, info)
 	L.statusMode.TextColor3 = statusColor
 	L.throttle.Text = "Throttle:  " .. math.floor(info.throttle * 100 + 0.5) .. "%"
 	L.thrustMode.Text = "Thrust:    " .. info.thrustMode
+	L.warp.Text = "Warp:      " .. (info.warp or 1) .. "x"
+	L.view.Text = "View:      " .. (info.mapMode and "MAP" or "FLIGHT")
 end
 
 return HUDController

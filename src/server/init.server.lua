@@ -2,21 +2,25 @@
 	Server (Script)
 	ServerScriptService.Server
 
-	Phase 1 server responsibilities are intentionally tiny: the flight sim runs
-	entirely on the client for responsiveness, so the server only sets up the
-	single-player feel. Persistence (ProfileStore: craft designs, progress,
-	unlocks) and progression validation arrive in later phases.
+	The flight sim runs entirely on the client for responsiveness; the server
+	handles the single-player setup now and will own persistence (ProfileStore:
+	craft designs, progress, unlocks) in a later phase.
+
+	The player's avatar rides the craft (see CrewController on the client), so
+	characters are enabled and the void-cleanup height is pushed far away because
+	the craft can travel far in sim space.
 ]]
 
 local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
 
--- No walking avatar: the player only ever flies a craft, and the client owns a
--- Scriptable camera. Disabling auto character load keeps Roblox rigid-body
--- physics and the default humanoid camera out of the way entirely.
-Players.CharacterAutoLoads = false
+Players.CharacterAutoLoads = true
+
+-- The craft is kinematic and can roam; never auto-destroy parts for "falling".
+Workspace.FallenPartsDestroyHeight = -1e9
 
 Players.PlayerAdded:Connect(function(player)
 	print(("[RocketSim] %s joined."):format(player.Name))
 end)
 
-print("[RocketSim] Server ready (Phase 1 - client-side flight sim; persistence comes later).")
+print("[RocketSim] Server ready (Phase 2 - client-side flight sim; persistence comes later).")

@@ -2,14 +2,13 @@
 	Client bootstrap (LocalScript)
 	StarterPlayer.StarterPlayerScripts.Client
 
-	The anti-tangle entry point. It:
-	  1. requires every system module and registers it by name,
-	  2. runs ALL :Init() (no system touches another here),
-	  3. runs ALL :Start() (systems wire themselves together via the Registry).
+	The anti-tangle entry point:
+	  1. require every system module and register it by name,
+	  2. run ALL :Init() (no system touches another here),
+	  3. run ALL :Start() (systems wire themselves together via the Registry).
 
-	Start order matters: FlightController starts LAST so the renderer, camera and
-	HUD have already subscribed to its per-frame "Updated" signal before it
-	begins firing.
+	FlightController starts LAST so the renderer, rider, map view, camera and HUD
+	have already subscribed to its per-frame "Updated" signal before it fires.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -18,12 +17,13 @@ local Registry = require(Shared:WaitForChild("Registry"))
 
 local systemsFolder = script:WaitForChild("Systems")
 
--- The set of systems (require + register). Order here = Init order.
 local initOrder = {
 	"FloatingOriginController",
 	"InputController",
 	"FlightController",
 	"CraftRenderer",
+	"CrewController",
+	"MapViewController",
 	"CameraController",
 	"HUDController",
 }
@@ -33,6 +33,8 @@ local startOrder = {
 	"FloatingOriginController",
 	"InputController",
 	"CraftRenderer",
+	"CrewController",
+	"MapViewController",
 	"CameraController",
 	"HUDController",
 	"FlightController",
@@ -59,4 +61,4 @@ for _, name in ipairs(startOrder) do
 	end
 end
 
-print("[RocketSim] Client systems started (Phase 1).")
+print("[RocketSim] Client systems started (Phase 2).")
