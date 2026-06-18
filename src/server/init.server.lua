@@ -9,14 +9,12 @@
 ]]
 
 local Players = game:GetService("Players")
-local Workspace = game:GetService("Workspace")
 
 -- No server-side physics character; the client renders a cosmetic rider instead.
 Players.CharacterAutoLoads = false
-Workspace.FallenPartsDestroyHeight = -1e9
 
 Players.PlayerAdded:Connect(function(player)
 	print(("[RocketSim] %s joined."):format(player.Name))
 end)
 
-print("[RocketSim] Server ready (client-side flight sim; persistence comes later).")
+print("[RocketSim] Server ready -- build P2.5 (client-side flight sim).")
