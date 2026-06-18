@@ -47,6 +47,7 @@ function CraftRenderer:Start()
 	self._origin = Registry:Get("FloatingOriginController")
 	local Flight = Registry:Get("FlightController")
 
+	self:_cleanupWorld()
 	self:_setupLighting()
 	self:_buildBody()
 	self:_buildCraft()
@@ -56,6 +57,26 @@ function CraftRenderer:Start()
 	Flight:GetUpdatedSignal():Connect(function(state, info)
 		self:_render(state, info)
 	end)
+end
+
+function CraftRenderer:_cleanupWorld()
+	-- The default Baseplate template ships an Atmosphere (that is the "fog") plus
+	-- a baseplate and spawn that sit right where our craft renders. Remove them
+	-- so the space scene is clean.
+	for _, inst in ipairs(Lighting:GetChildren()) do
+		if inst:IsA("Atmosphere") or inst:IsA("Sky") then
+			inst:Destroy()
+		end
+	end
+	local baseplate = Workspace:FindFirstChild("Baseplate")
+	if baseplate then
+		baseplate:Destroy()
+	end
+	for _, inst in ipairs(Workspace:GetDescendants()) do
+		if inst:IsA("SpawnLocation") then
+			inst:Destroy()
+		end
+	end
 end
 
 function CraftRenderer:_setupLighting()

@@ -23,9 +23,10 @@ Config.BODY = {
 	continentSeed = 1337,
 }
 
--- Start in a circular orbit one body-radius up.
+-- Start in a circular orbit well above the surface, so the planet reads as a
+-- ball in the distance (not a wall filling the screen).
 Config.START = {
-	altitude = 6000, -- studs above surface -> orbital radius = radius + altitude
+	altitude = 12000, -- studs above surface -> orbital radius = radius + altitude
 }
 
 -- The test craft (a small rocket; infinite fuel until Phase 3).

@@ -2,25 +2,21 @@
 	Server (Script)
 	ServerScriptService.Server
 
-	The flight sim runs entirely on the client for responsiveness; the server
-	handles the single-player setup now and will own persistence (ProfileStore:
-	craft designs, progress, unlocks) in a later phase.
-
-	The player's avatar rides the craft (see CrewController on the client), so
-	characters are enabled and the void-cleanup height is pushed far away because
-	the craft can travel far in sim space.
+	The flight sim runs entirely on the client. The player's avatar is shown as a
+	client-side cosmetic rider on the craft (see CrewController), so the real
+	server character is disabled - that avoids a physics character falling through
+	our floating-origin world. Persistence (ProfileStore) comes in a later phase.
 ]]
 
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 
-Players.CharacterAutoLoads = true
-
--- The craft is kinematic and can roam; never auto-destroy parts for "falling".
+-- No server-side physics character; the client renders a cosmetic rider instead.
+Players.CharacterAutoLoads = false
 Workspace.FallenPartsDestroyHeight = -1e9
 
 Players.PlayerAdded:Connect(function(player)
 	print(("[RocketSim] %s joined."):format(player.Name))
 end)
 
-print("[RocketSim] Server ready (Phase 2 - client-side flight sim; persistence comes later).")
+print("[RocketSim] Server ready (client-side flight sim; persistence comes later).")
