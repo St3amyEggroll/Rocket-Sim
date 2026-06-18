@@ -20,7 +20,7 @@ local CrewController = {}
 
 function CrewController:Init()
 	self._char = nil
-	self._craftRadius = Config.CRAFT.radius
+	self._riderHeight = Config.CRAFT.riderHeight
 end
 
 function CrewController:Start()
@@ -105,7 +105,7 @@ function CrewController:_ride(state)
 		look = look.Unit
 	end
 
-	local standPos = craftRender + up * (self._craftRadius + 3)
+	local standPos = craftRender + up * self._riderHeight
 	char:PivotTo(CFrame.lookAt(standPos, standPos + look, up))
 end
 

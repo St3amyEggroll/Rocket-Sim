@@ -1,10 +1,11 @@
 --[[
 	MapViewController
-	Owner of: the orbit trajectory line and the apoapsis / periapsis markers.
+	Owner of: the orbit trajectory line, the apo/peri markers, and the craft
+	marker (so you can see where the rocket is when zoomed out).
 
 	Draws the current orbit with Orbit.sampleOrbitPath as a chain of thin neon
 	segments in 3D world space, refreshed every frame through the floating origin
-	(so the line shifts correctly on rebases and morphs live while you burn).
+	(so it shifts correctly on rebases and morphs live while you burn).
 
 	Visible only in map view (toggle M). While coasting the orbit is fixed, so
 	the line is stable; while thrusting it updates as the trajectory changes.
@@ -72,6 +73,25 @@ function MapViewController:_buildPool()
 	end
 	self._apoMarker = newPart(cfg.apoColor, Enum.PartType.Ball)
 	self._periMarker = newPart(cfg.periColor, Enum.PartType.Ball)
+	self._craftMarker = newPart(cfg.craftColor, Enum.PartType.Ball)
+
+	-- "CRAFT" label so the rocket is obvious on the map.
+	local billboard = Instance.new("BillboardGui")
+	billboard.Name = "CraftLabel"
+	billboard.Size = UDim2.fromOffset(80, 20)
+	billboard.StudsOffsetWorldSpace = Vector3.new(0, 0, 0)
+	billboard.AlwaysOnTop = true
+	billboard.Adornee = self._craftMarker
+	billboard.Parent = self._craftMarker
+	local label = Instance.new("TextLabel")
+	label.Size = UDim2.fromScale(1, 1)
+	label.BackgroundTransparency = 1
+	label.Font = Enum.Font.Code
+	label.TextSize = 14
+	label.TextColor3 = cfg.craftColor
+	label.Text = "CRAFT"
+	label.Parent = billboard
+	self._craftLabel = billboard
 end
 
 function MapViewController:_setVisible(visible)
@@ -81,11 +101,12 @@ function MapViewController:_setVisible(visible)
 	end
 	self._apoMarker.Transparency = visible and 0 or 1
 	self._periMarker.Transparency = visible and 0 or 1
+	self._craftMarker.Transparency = visible and 0 or 1
+	self._craftLabel.Enabled = visible
 end
 
 function MapViewController:_update(state)
-	local mapMode = self._input:GetMapMode()
-	if not mapMode then
+	if not self._input:GetMapMode() then
 		if self._visible then
 			self:_setVisible(false)
 		end
@@ -102,7 +123,6 @@ function MapViewController:_update(state)
 	local apoR = (readout.apoapsis < math.huge) and readout.apoapsis or mag(state.position)
 	local thickness = math.clamp(apoR * cfg.thicknessScale, cfg.thicknessMin, cfg.thicknessMax)
 
-	-- Convert to render space; track the farthest / nearest points for markers.
 	local n = #pts
 	local render = table.create(n)
 	local maxD, minD, maxI, minI = -1, math.huge, 1, 1
@@ -118,7 +138,6 @@ function MapViewController:_update(state)
 		end
 	end
 
-	-- One segment per gap between consecutive sample points.
 	local segs = self._segments
 	for i = 1, #segs do
 		local a = render[i]
@@ -127,8 +146,7 @@ function MapViewController:_update(state)
 		if not b then
 			seg.Transparency = 1
 		else
-			local delta = b - a
-			local len = delta.Magnitude
+			local len = (b - a).Magnitude
 			if len < 1e-3 then
 				seg.Transparency = 1
 			else
@@ -139,9 +157,14 @@ function MapViewController:_update(state)
 		end
 	end
 
-	-- Apo/peri markers (only meaningful for a closed orbit).
+	-- Craft marker rides the current position.
+	local mk = thickness * 3
+	self._craftMarker.Transparency = 0
+	self._craftMarker.Size = Vector3.new(mk, mk, mk)
+	self._craftMarker.CFrame = CFrame.new(origin:ToRender(state.position))
+
+	-- Apo/peri markers (closed orbits only).
 	if readout.apoapsis < math.huge then
-		local mk = thickness * 3
 		self._apoMarker.Transparency = 0
 		self._periMarker.Transparency = 0
 		self._apoMarker.Size = Vector3.new(mk, mk, mk)
