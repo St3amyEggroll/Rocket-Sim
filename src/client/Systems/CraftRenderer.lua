@@ -131,10 +131,11 @@ function CraftRenderer:_buildBody()
 	-- Continent / ice slabs sitting tangent to the surface (a thin face pokes out
 	-- so they read as land from orbit).
 	local rng = Random.new(body.continentSeed)
+	local slabThickness = body.radius * 0.05
 	local function slab(dir, size, color, material)
 		dir = dir.Unit
 		makePart(model, "Land", {
-			Size = Vector3.new(size, size, 280),
+			Size = Vector3.new(size, size, slabThickness),
 			Color = color,
 			Material = material,
 			-- thin Z axis points outward along the surface normal
@@ -154,11 +155,11 @@ function CraftRenderer:_buildBody()
 			math.clamp(c.G * 255 + tint, 0, 255),
 			math.clamp(c.B * 255 + tint * 0.5, 0, 255)
 		)
-		slab(dir, rng:NextNumber(1300, 2000), color, Enum.Material.Grass)
+		slab(dir, rng:NextNumber(body.radius * 0.28, body.radius * 0.45), color, Enum.Material.Grass)
 	end
 	-- Ice caps.
-	slab(Vector3.yAxis, 2200, body.iceColor, Enum.Material.Glacier)
-	slab(-Vector3.yAxis, 2200, body.iceColor, Enum.Material.Glacier)
+	slab(Vector3.yAxis, body.radius * 0.5, body.iceColor, Enum.Material.Glacier)
+	slab(-Vector3.yAxis, body.radius * 0.5, body.iceColor, Enum.Material.Glacier)
 
 	model.Parent = Workspace
 	self._body = model
