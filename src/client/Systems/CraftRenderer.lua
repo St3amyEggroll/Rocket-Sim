@@ -1,13 +1,8 @@
 --[[
 	CraftRenderer
-	Owner of: the rendered planet, launch pad, and rocket.
-
-	The planet is a REAL Ball part rendered CAMERA-RELATIVE: each frame it is placed
-	along the true direction to the body, at a distance scaled so its angular size
-	matches reality. Because it is a normal, close part it can never be culled, yet
-	it shrinks naturally to a dot as you fly away. Continents share the body's seed
-	so the correct face shows as you orbit. Map view uses a small body at the
-	compressed focus instead.
+	Owner of: the rendered rocket, the launch pad, lighting, and one-time world
+	cleanup. The planet itself is real Roblox Terrain (see TerrainController), fixed
+	at the world origin, so it needs no per-frame rendering here.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -20,8 +15,6 @@ local Config = require(Shared:WaitForChild("Config"))
 local Registry = require(Shared:WaitForChild("Registry"))
 
 local CraftRenderer = {}
-
-local PARK = Vector3.new(0, Config.RENDER.parkY, 0)
 
 local function makePart(parent, name, props)
 	local p = Instance.new("Part")
@@ -67,8 +60,6 @@ function CraftRenderer:Start()
 
 	self:_cleanupWorld()
 	self:_setupLighting()
-	self:_buildPlanetProxy()
-	self:_buildMapPlanet()
 	self:_buildPad()
 	self:_rebuildCraft()
 
@@ -98,89 +89,26 @@ function CraftRenderer:_cleanupWorld()
 end
 
 function CraftRenderer:_setupLighting()
-	Lighting.ClockTime = 14.5
-	Lighting.GeographicLatitude = 20
+	Lighting.ClockTime = 14
+	Lighting.GeographicLatitude = 25
 	Lighting.Brightness = 2.5
-	Lighting.Ambient = Color3.fromRGB(70, 72, 85)
-	Lighting.OutdoorAmbient = Color3.fromRGB(150, 150, 160)
-	Lighting.GlobalShadows = false
-	Lighting.EnvironmentDiffuseScale = 0.4
+	Lighting.Ambient = Color3.fromRGB(80, 84, 96)
+	Lighting.OutdoorAmbient = Color3.fromRGB(150, 152, 160)
+	Lighting.GlobalShadows = true
+	Lighting.EnvironmentDiffuseScale = 0.5
 	Lighting.EnvironmentSpecularScale = 0.4
 	Lighting.FogEnd = 1e9
 end
 
--- Continent surface directions, shared between the flight proxy and (visually)
--- the real planet so the correct face shows.
-function CraftRenderer:_continentDirs()
-	local dirs = {}
-	local rng = Random.new(Config.BODY.continentSeed)
-	for _ = 1, Config.BODY.continents do
-		local d = Vector3.new(rng:NextNumber(-1, 1), rng:NextNumber(-1, 1), rng:NextNumber(-1, 1))
-		if d.Magnitude < 1e-3 then
-			d = Vector3.yAxis
-		end
-		dirs[#dirs + 1] = { dir = d.Unit, size = rng:NextNumber(0.28, 0.42) }
-	end
-	return dirs
-end
-
-function CraftRenderer:_buildPlanetProxy()
-	local body = Config.BODY
-	local pr = Config.RENDER.proxyRadius
-	local model = Instance.new("Model")
-	model.Name = "PlanetProxy"
-
-	local ocean = makePart(model, "Ocean", {
-		Shape = Enum.PartType.Ball,
-		Size = Vector3.new(pr * 2, pr * 2, pr * 2),
-		Color = body.oceanColor,
-		Material = Enum.Material.SmoothPlastic,
-		CFrame = CFrame.new(0, 0, 0),
-	})
-	model.PrimaryPart = ocean
-
-	for _, c in ipairs(self:_continentDirs()) do
-		makePart(model, "Land", {
-			Shape = Enum.PartType.Ball,
-			Size = Vector3.new(pr * c.size * 2, pr * c.size * 2, pr * c.size * 0.6),
-			Color = body.landColor,
-			Material = Enum.Material.Grass,
-			CFrame = CFrame.lookAt(c.dir * pr, c.dir * pr * 2),
-		})
-	end
-	for _, pole in ipairs({ Vector3.yAxis, -Vector3.yAxis }) do
-		makePart(model, "Ice", {
-			Shape = Enum.PartType.Ball,
-			Size = Vector3.new(pr * 0.7, pr * 0.7, pr * 0.4),
-			Color = body.iceColor,
-			Material = Enum.Material.Glacier,
-			CFrame = CFrame.lookAt(pole * pr, pole * pr * 2),
-		})
-	end
-
-	model.Parent = Workspace
-	self._planetProxy = model
-end
-
-function CraftRenderer:_buildMapPlanet()
-	local r = Config.RENDER.mapPlanetRadius
-	self._mapPlanet = makePart(Workspace, "MapPlanet", {
-		Shape = Enum.PartType.Ball,
-		Size = Vector3.new(r * 2, r * 2, r * 2),
-		Color = Config.BODY.landColor,
-		Material = Enum.Material.SmoothPlastic,
-		CFrame = CFrame.new(PARK),
-	})
-end
-
 function CraftRenderer:_buildPad()
-	self._pad = makePart(Workspace, "LaunchPad", {
-		Shape = Enum.PartType.Cylinder,
-		Size = Vector3.new(6, 90, 90),
+	-- Fixed at the +Y launch pole (origin is fixed, so this never moves).
+	local R = Config.BODY.radius
+	makePart(Workspace, "LaunchPad", {
+		Size = Vector3.new(120, 8, 120),
 		Color = Color3.fromRGB(90, 92, 100),
 		Material = Enum.Material.Metal,
+		CFrame = CFrame.new(0, R - 4, 0),
 	})
-	self._padSim = Orbit.vec(Config.BODY.radius, 0, 0)
 end
 
 function CraftRenderer:_rebuildCraft()
@@ -239,44 +167,10 @@ function CraftRenderer:_rebuildCraft()
 end
 
 function CraftRenderer:_render(state, info)
-	local origin = self._origin
-	local R = Config.BODY.radius
-	local focus = origin:ToRender(Orbit.vec(0, 0, 0))
-	local mapMode = info and info.mapMode
-
-	if mapMode then
-		self._planetProxy:PivotTo(CFrame.new(PARK))
-		self._mapPlanet:PivotTo(CFrame.new(focus))
-		self._pad:PivotTo(CFrame.new(PARK))
-		self._craft:PivotTo(CFrame.new(PARK))
-		return
-	end
-
-	self._mapPlanet:PivotTo(CFrame.new(PARK))
-
-	-- Camera-relative planet proxy.
-	local camPos = Workspace.CurrentCamera and Workspace.CurrentCamera.CFrame.Position or focus
-	local toBody = focus - camPos
-	local mag = toBody.Magnitude
-	if mag < 1e-3 then
-		toBody = Vector3.new(0, -1, 0)
-		mag = 1
-	end
-	local D = math.max(mag, R)
-	local dir = toBody / mag
-	local proxyDist = math.clamp(
-		Config.RENDER.proxyRadius * D / R,
-		Config.RENDER.proxyDistMin,
-		Config.RENDER.proxyDistMax
-	)
-	self._planetProxy:PivotTo(CFrame.new(camPos + dir * proxyDist))
-
-	-- Pad + rocket at true positions.
-	local craftRender = origin:ToRender(state.position)
-	self._pad:PivotTo(CFrame.new(origin:ToRender(self._padSim)))
-
+	local craftRender = self._origin:ToRender(state.position)
 	local pd = info and info.pointDir or Orbit.vec(0, 1, 0)
-	self._craft:PivotTo(pointCFrame(craftRender, Vector3.new(pd.x or pd.X, pd.y or pd.Y, pd.z or pd.Z)))
+	local up = Vector3.new(pd.x or pd.X, pd.y or pd.Y, pd.z or pd.Z)
+	self._craft:PivotTo(pointCFrame(craftRender, up))
 
 	local throttle = (info and info.throttle) or 0
 	if info and info.powered and throttle > 0 then

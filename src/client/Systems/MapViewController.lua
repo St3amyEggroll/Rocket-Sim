@@ -182,8 +182,8 @@ function MapViewController:_update(state, info)
 	local function projSim(sp)
 		return focus + Vector3.new(sp.x, sp.y, sp.z) * s
 	end
-	local thickness = Config.RENDER.mapPlanetRadius * 0.05
-	local mk = Config.RENDER.mapPlanetRadius * 0.16
+	local thickness = self._bodyRadius * 0.03
+	local mk = self._bodyRadius * 0.08
 
 	-- Orbit line; segments below the surface go red (impact warning).
 	local pts = self._simPath

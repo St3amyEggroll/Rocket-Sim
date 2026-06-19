@@ -121,12 +121,6 @@ function CrewController:_ride(state, info)
 		return
 	end
 
-	-- Parked out of sight in map view (the craft marker represents it there).
-	if info and info.mapMode then
-		model:PivotTo(CFrame.new(0, Config.RENDER.parkY, 0))
-		return
-	end
-
 	-- Ride along the rocket's nose (pointDir is a Vector3 = attitude.LookVector).
 	local pd = info and info.pointDir
 	local up

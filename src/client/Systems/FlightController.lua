@@ -35,8 +35,9 @@ function FlightController:Init()
 	self._turnStart = Config.LAUNCH.turnStartAlt
 	self._turnEnd = Config.LAUNCH.turnEndAlt
 
-	self._state = { position = Orbit.vec(body.radius, 0, 0), velocity = Orbit.vec(0, 0, 0) }
-	self._attitude = CFrame.lookAt(Vector3.zero, Vector3.xAxis, Vector3.yAxis) -- nose = +X (radial up)
+	-- Launch site at the +Y pole; nose points radial-out (+Y).
+	self._state = { position = Orbit.vec(0, body.radius, 0), velocity = Orbit.vec(0, 0, 0) }
+	self._attitude = CFrame.lookAt(Vector3.zero, Vector3.yAxis, Vector3.xAxis)
 	self._status = "VAB"
 	self._powered = false
 	self._landed = true
@@ -68,11 +69,11 @@ end
 
 function FlightController:_onMode(mode)
 	self._vehicle:ResetRuntime()
-	self._state = { position = Orbit.vec(self._bodyRadius, 0, 0), velocity = Orbit.vec(0, 0, 0) }
-	self._attitude = CFrame.lookAt(Vector3.zero, Vector3.xAxis, Vector3.yAxis)
+	self._state = { position = Orbit.vec(0, self._bodyRadius, 0), velocity = Orbit.vec(0, 0, 0) }
+	self._attitude = CFrame.lookAt(Vector3.zero, Vector3.yAxis, Vector3.xAxis)
 	self._landed = true
 	self._status = (mode == "Flight") and "Landed" or "VAB"
-	self._origin:SetOrigin(self._state.position)
+	self._origin:SetOrigin(Orbit.vec(0, 0, 0))
 end
 
 function FlightController:_ascentDirection(pos)
@@ -145,13 +146,13 @@ end
 -- that clears the drawn planet clears the real surface). Returns scale + the
 -- render extent the map camera should frame.
 function FlightController:_mapInfo()
-	local scale = Config.RENDER.mapPlanetRadius / self._bodyRadius
+	-- Small world: map is drawn at TRUE scale around the real terrain planet.
 	local p = self._state.position
 	local rNow = math.sqrt(p.x * p.x + p.y * p.y + p.z * p.z)
 	local ro = Orbit.getReadout(self._state, self._mu)
 	local apoR = (ro.apoapsis < math.huge) and ro.apoapsis or rNow
-	local frameRender = math.max(apoR, rNow, self._bodyRadius) * scale
-	return scale, frameRender
+	local frameRender = math.max(apoR, rNow, self._bodyRadius * 1.3)
+	return 1, frameRender
 end
 
 function FlightController:_fire(extra)

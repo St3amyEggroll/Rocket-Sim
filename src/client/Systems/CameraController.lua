@@ -28,6 +28,7 @@ function CameraController:Start()
 	self._input = Registry:Get("InputController")
 	self._origin = Registry:Get("FloatingOriginController")
 	local Flight = Registry:Get("FlightController")
+	self._bodyRadius = Flight:GetBodyRadius()
 
 	local cam = Workspace.CurrentCamera
 	local waited = 0
@@ -67,9 +68,10 @@ function CameraController:_update(state, info)
 			math.sin(orbit.elevation),
 			math.sin(orbit.azimuth) * cosE
 		)
-		local frameR = (info and info.mapFrameRadius) or Config.RENDER.mapPlanetRadius * 2
-		frameR = math.max(frameR, Config.RENDER.mapPlanetRadius * 1.4)
-		local distance = frameR * Config.RENDER.mapCamMultiplier * orbit.mapZoom
+		local R = self._bodyRadius or 500
+		local frameR = (info and info.mapFrameRadius) or R * 2
+		frameR = math.max(frameR, R * 1.4)
+		local distance = frameR * Config.CAMERA.mapCamMultiplier * orbit.mapZoom
 		cam.CFrame = CFrame.lookAt(target + dir * distance, target)
 		return
 	end

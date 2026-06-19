@@ -22,10 +22,9 @@ function FloatingOriginController:Init()
 end
 
 function FloatingOriginController:Start()
-	-- Seed the origin from the craft's starting position so frame 1 renders the
-	-- craft right at the render origin.
-	local Flight = Registry:Get("FlightController")
-	self:SetOrigin(Flight:GetState().position)
+	-- Small world: keep the render origin fixed at the body centre so the fixed
+	-- Terrain planet stays aligned (never rebase).
+	self:SetOrigin(Orbit.vec(0, 0, 0))
 end
 
 -- Set the render origin to a sim position (stored as a copy).

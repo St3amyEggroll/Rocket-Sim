@@ -19,6 +19,7 @@ local systemsFolder = script:WaitForChild("Systems")
 
 local initOrder = {
 	"DebugController",
+	"TerrainController",
 	"GameModeController",
 	"VehicleController",
 	"FloatingOriginController",
@@ -39,6 +40,7 @@ local initOrder = {
 -- current frame's camera position.
 local startOrder = {
 	"DebugController",
+	"TerrainController",
 	"GameModeController",
 	"VehicleController",
 	"FloatingOriginController",
@@ -85,4 +87,4 @@ for _, name in ipairs(startOrder) do
 	end
 end
 
-print("[RocketSim] Client systems started -- build P3.7 (accurate to-scale map).")
+print("[RocketSim] Client systems started -- build P3.8 (real grass terrain planet).")
