@@ -1,10 +1,8 @@
 --[[
 	TerrainController
-	Builds the planet as a single Roblox-Terrain grass sphere at the world origin
-	(the floating origin is fixed at 0 for this small world, so sim == world).
-	Generated once at start - no streaming, nothing to unload. Grass everywhere,
-	with oceans, rocky mountains, and an ice cap; the +Y pole is kept clear as the
-	launch site.
+	Builds the planet: a real grass Ball part (so it renders at any distance and
+	never culls), plus a real Roblox-Terrain grass patch at the +Y launch pole for
+	walkable ground detail at the launch site. No water/rock blobs - clean grass.
 ]]
 
 local Workspace = game:GetService("Workspace")
@@ -18,57 +16,47 @@ local TerrainController = {}
 function TerrainController:Init() end
 
 function TerrainController:Start()
+	self:_buildBody()
 	task.spawn(function()
-		self:_generate()
+		self:_buildLaunchTerrain()
 	end)
 end
 
-function TerrainController:_generate()
+function TerrainController:_buildBody()
+	local body = Config.BODY
+	local R = body.radius
+	local planet = Instance.new("Part")
+	planet.Name = "Planet"
+	planet.Shape = Enum.PartType.Ball
+	planet.Size = Vector3.new(R * 2, R * 2, R * 2) -- <=2048; a real, never-culled part
+	planet.Anchored = true
+	planet.CanCollide = true
+	planet.Color = body.grassColor
+	planet.Material = Enum.Material.Grass
+	planet.CFrame = CFrame.new(0, 0, 0)
+	planet.Parent = Workspace
+	self._planet = planet
+end
+
+function TerrainController:_buildLaunchTerrain()
 	local body = Config.BODY
 	local R = body.radius
 	local terrain = Workspace.Terrain
 	terrain:Clear()
-
 	pcall(function()
 		terrain:SetMaterialColor(Enum.Material.Grass, body.grassColor)
-		terrain:SetMaterialColor(Enum.Material.Rock, body.rockColor)
-		terrain:SetMaterialColor(Enum.Material.Sand, body.sandColor)
-		terrain:SetMaterialColor(Enum.Material.Water, body.waterColor)
 	end)
 
-	-- The planet itself (one big grass ball at the origin).
-	terrain:FillBall(Vector3.zero, R, Enum.Material.Grass)
+	-- Flat grass field at the +Y pole (top at the surface, R). Light voxel count.
+	terrain:FillBlock(CFrame.new(0, R - 30, 0), Vector3.new(800, 60, 800), Enum.Material.Grass)
 
+	-- A few subtle low hills for relief (not big spheres).
 	local rng = Random.new(body.seed)
-	local function randDir()
-		local d = Vector3.new(rng:NextNumber(-1, 1), rng:NextNumber(-1, 1), rng:NextNumber(-1, 1))
-		if d.Magnitude < 1e-3 then
-			d = Vector3.yAxis
-		end
-		return d.Unit
-	end
-
-	-- Oceans (carve water into the crust), away from the +Y launch pole.
 	for _ = 1, 8 do
-		local d = randDir()
-		if d.Y < 0.55 then
-			terrain:FillBall(d * (R - 25), rng:NextNumber(110, 190), Enum.Material.Water)
-		end
+		local x = rng:NextNumber(-320, 320)
+		local z = rng:NextNumber(-320, 320)
+		terrain:FillBall(Vector3.new(x, R - 8, z), rng:NextNumber(28, 55), Enum.Material.Grass)
 	end
-
-	-- Mountains (rock bumps above the surface).
-	for _ = 1, 12 do
-		local d = randDir()
-		if d.Y < 0.7 then
-			terrain:FillBall(d * (R + 8), rng:NextNumber(35, 80), Enum.Material.Rock)
-		end
-	end
-
-	-- Ice cap at the south pole.
-	terrain:FillBall(Vector3.new(0, -1, 0) * R, R * 0.38, Enum.Material.Glacier)
-
-	-- A small flat grass clearing at the launch pole (overwrite anything stray).
-	terrain:FillBall(Vector3.new(0, 1, 0) * (R - 6), 120, Enum.Material.Grass)
 end
 
 return TerrainController

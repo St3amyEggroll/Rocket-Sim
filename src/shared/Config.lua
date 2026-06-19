@@ -11,13 +11,11 @@ local Config = {}
 
 Config.BODY = {
 	name = "Terra",
-	radius = 500, -- whole-sphere terrain ball
-	mu = 3.75e6, -- surface gravity ~15 studs/s^2
+	radius = 1000, -- a real Ball part (<=1024 radius) so it never culls
+	mu = 1.5e7, -- surface gravity ~15 studs/s^2
 	seed = 1337,
 	grassColor = Color3.fromRGB(86, 140, 74),
-	waterColor = Color3.fromRGB(40, 96, 150),
-	rockColor = Color3.fromRGB(120, 116, 108),
-	sandColor = Color3.fromRGB(214, 198, 150),
+	hillColor = Color3.fromRGB(74, 124, 66),
 }
 
 Config.CRAFT = {
@@ -27,8 +25,8 @@ Config.CRAFT = {
 
 Config.LAUNCH = {
 	defaultDesign = { "EngineMain", "TankL", "TankL", "Pod" }, -- bottom -> top
-	turnStartAlt = 80,
-	turnEndAlt = 600,
+	turnStartAlt = 150,
+	turnEndAlt = 1200,
 }
 
 Config.FLIGHT = {
@@ -55,9 +53,9 @@ Config.TIMEWARP = {
 }
 
 Config.CAMERA = {
-	distanceDefault = 120,
+	distanceDefault = 130,
 	distanceMin = 30,
-	distanceMax = 6000,
+	distanceMax = 9000,
 	startInMapView = false,
 	fieldOfView = 70,
 	orbitSensitivity = 0.006,
