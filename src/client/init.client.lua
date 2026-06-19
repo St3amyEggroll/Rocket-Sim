@@ -81,4 +81,4 @@ for _, name in ipairs(startOrder) do
 	end
 end
 
-print("[RocketSim] Client systems started -- build P3.2 (planet LOD - always visible).")
+print("[RocketSim] Client systems started -- build P3.3 (bigger planet, never fades).")

@@ -258,27 +258,33 @@ function CraftRenderer:_render(state, info)
 	local focusRender = origin:ToRender(Orbit.vec(0, 0, 0))
 
 	if mapMode then
-		-- Whole scene compressed around the body: body at focus, scaled down.
+		-- Whole scene compressed around the body: body at focus, scaled down but
+		-- never below a visible size.
 		local s = info.mapScale or 1
+		local renderedR = math.max(R * s, Config.RENDER.mapViewRadius * Config.RENDER.bodyMapMinFrac)
 		self._bodyModel:PivotTo(CFrame.new(focusRender))
-		self._oceanMesh.Scale = Vector3.new(R * 2 * s, R * 2 * s, R * 2 * s)
+		self._oceanMesh.Scale = Vector3.new(renderedR * 2, renderedR * 2, renderedR * 2)
 		self:_setLand(false)
 		self._pad:PivotTo(CFrame.new(PARK))
 		self._craft:PivotTo(CFrame.new(PARK))
 		return
 	end
 
-	-- Chase view: body LOD so it is always visible within render range.
+	-- Chase view: body LOD so it is always visible within render range AND never
+	-- shrinks below a minimum on-screen size (so it can't fade out when far / when
+	-- you zoom out).
 	local cam = Workspace.CurrentCamera
 	local camPos = cam and cam.CFrame.Position or focusRender
 	local toBody = focusRender - camPos
 	local D = math.max(toBody.Magnitude, 1)
 	local cap = Config.RENDER.bodyFlightCap
 	local d = math.min(D, cap)
-	local scale = d / D
+	local baseScale = d / D -- preserves true angular size
+	local minScale = (Config.RENDER.bodyMinAngular * d) / R -- floor on apparent size
+	local scale = math.max(baseScale, minScale)
 	self._bodyModel:PivotTo(CFrame.new(camPos + (toBody / D) * d))
 	self._oceanMesh.Scale = Vector3.new(R * 2 * scale, R * 2 * scale, R * 2 * scale)
-	self:_setLand(scale > 0.999)
+	self:_setLand(baseScale > 0.999)
 
 	-- Pad: only worth showing when near the surface.
 	local craftRender = origin:ToRender(state.position)

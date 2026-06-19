@@ -13,8 +13,8 @@ local Config = {}
 -- The central body. It lives at the SIM origin (0,0,0).
 Config.BODY = {
 	name = "Terra",
-	mu = 5.92e8, -- ~120 s period at the start orbit below
-	radius = 2000, -- surface radius (studs)
+	mu = 5.92e8,
+	radius = 3500, -- surface radius (studs) - a bigger, more imposing planet
 
 	oceanColor = Color3.fromRGB(38, 92, 158),
 	landColor = Color3.fromRGB(74, 128, 74),
@@ -52,14 +52,17 @@ Config.FLIGHT = {
 -- Rendering / level-of-detail so bodies never cull out of view.
 Config.RENDER = {
 	-- Chase view: the body is never drawn farther than this from the camera; past
-	-- it the body is pulled in and shrunk (angular size preserved) and its surface
-	-- detail (continents) is dropped. Keep it inside any reasonable render range.
-	bodyFlightCap = 4500,
-	-- Map view: the whole orbit is drawn within this radius of the body, so it
-	-- always fits in render range regardless of the true orbit size.
+	-- it the body is pulled in and shrunk (and its continents dropped). Must be
+	-- inside any reasonable render range.
+	bodyFlightCap = 5000,
+	-- ...but never let it shrink below this on-screen (angular) radius, so it
+	-- stays a visible disc no matter how far away you get or how far you zoom out.
+	bodyMinAngular = 0.18,
+	-- Map view: orbit is drawn within this radius of the body.
 	mapViewRadius = 3000,
-	mapCamMultiplier = 2.4, -- map camera distance = mapViewRadius * this * mapZoom
-	parkY = 50000, -- where hidden models are parked
+	bodyMapMinFrac = 0.16, -- body never smaller than this fraction of mapViewRadius
+	mapCamMultiplier = 2.4,
+	parkY = 50000,
 }
 
 Config.FLOATING_ORIGIN = {
@@ -78,9 +81,9 @@ Config.TIMEWARP = {
 
 Config.CAMERA = {
 	-- Chase ("flight") view: close on the craft + rider (default so you see it).
-	distanceDefault = 70,
+	distanceDefault = 90,
 	distanceMin = 20,
-	distanceMax = 4000,
+	distanceMax = 9000,
 	startInMapView = false,
 
 	-- Map view: framed on the body, pulled back to fit the orbit.
