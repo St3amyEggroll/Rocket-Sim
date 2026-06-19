@@ -1,14 +1,11 @@
 --[[
 	MapViewController
-	Owner of: the orbit trajectory line, the apo/peri markers, and the craft
-	marker.
+	Owner of: the orbit line + apo/peri/craft markers in map view.
 
-	Draws in the SAME compressed map space as CraftRenderer (everything scaled by
-	info.mapScale around the body so it always fits inside render range). The orbit
-	sim path is cached and only recomputed on a burn / when shown / periodically,
-	so warp stays smooth; each frame it just re-projects cached points.
-
-	Visible only in map view (toggle M).
+	Map view is a compressed overview: every sim point is scaled by info.mapScale
+	around the body (which CraftRenderer draws as a small ball at the focus). The
+	orbit path is cached and only recomputed on a burn / when shown / periodically,
+	so it stays smooth; each frame it re-projects the cached points.
 ]]
 
 local Workspace = game:GetService("Workspace")
@@ -30,10 +27,9 @@ function MapViewController:Init()
 	self._visible = false
 	self._needRecompute = true
 	self._frame = 0
-	self._simPath = nil
+	self._closed = true
 	self._maxI = 1
 	self._minI = 1
-	self._closed = true
 end
 
 function MapViewController:Start()
@@ -81,39 +77,37 @@ function MapViewController:_buildPool()
 	self._periMarker = newPart(cfg.periColor, Enum.PartType.Ball)
 	self._craftMarker = newPart(cfg.craftColor, Enum.PartType.Ball)
 
-	local billboard = Instance.new("BillboardGui")
-	billboard.Name = "CraftLabel"
-	billboard.Size = UDim2.fromOffset(80, 20)
-	billboard.AlwaysOnTop = true
-	billboard.Adornee = self._craftMarker
-	billboard.Parent = self._craftMarker
-	local label = Instance.new("TextLabel")
-	label.Size = UDim2.fromScale(1, 1)
-	label.BackgroundTransparency = 1
-	label.Font = Enum.Font.Code
-	label.TextSize = 14
-	label.TextColor3 = cfg.craftColor
-	label.Text = "CRAFT"
-	label.Parent = billboard
-	self._craftLabel = billboard
+	local bb = Instance.new("BillboardGui")
+	bb.Size = UDim2.fromOffset(80, 20)
+	bb.AlwaysOnTop = true
+	bb.Adornee = self._craftMarker
+	bb.Parent = self._craftMarker
+	local lbl = Instance.new("TextLabel")
+	lbl.Size = UDim2.fromScale(1, 1)
+	lbl.BackgroundTransparency = 1
+	lbl.Font = Enum.Font.Code
+	lbl.TextSize = 14
+	lbl.TextColor3 = cfg.craftColor
+	lbl.Text = "CRAFT"
+	lbl.Parent = bb
+	self._craftLabel = bb
 end
 
-function MapViewController:_setVisible(visible)
-	self._visible = visible
+function MapViewController:_setVisible(v)
+	self._visible = v
 	for _, seg in ipairs(self._segments) do
-		seg.Transparency = visible and 0 or 1
+		seg.Transparency = v and 0 or 1
 	end
-	self._apoMarker.Transparency = visible and 0 or 1
-	self._periMarker.Transparency = visible and 0 or 1
-	self._craftMarker.Transparency = visible and 0 or 1
-	self._craftLabel.Enabled = visible
+	self._apoMarker.Transparency = v and 0 or 1
+	self._periMarker.Transparency = v and 0 or 1
+	self._craftMarker.Transparency = v and 0 or 1
+	self._craftLabel.Enabled = v
 end
 
 function MapViewController:_recompute(state)
 	local pts = Orbit.sampleOrbitPath(state, self._mu, Config.ORBITLINE.segments)
-	local readout = Orbit.getReadout(state, self._mu)
-	self._closed = readout.apoapsis < math.huge
-
+	local ro = Orbit.getReadout(state, self._mu)
+	self._closed = ro.apoapsis < math.huge
 	local maxD, minD, maxI, minI = -1, math.huge, 1, 1
 	for i = 1, #pts do
 		local d = mag(pts[i])
@@ -125,8 +119,7 @@ function MapViewController:_recompute(state)
 		end
 	end
 	self._simPath = pts
-	self._maxI = maxI
-	self._minI = minI
+	self._maxI, self._minI = maxI, minI
 end
 
 function MapViewController:_update(state, info)
@@ -141,7 +134,7 @@ function MapViewController:_update(state, info)
 	end
 
 	self._frame += 1
-	if (info and info.powered) or self._frame % 30 == 0 then
+	if (info and info.powered) or self._frame % 20 == 0 then
 		self._needRecompute = true
 	end
 	if self._needRecompute or not self._simPath then
@@ -149,14 +142,13 @@ function MapViewController:_update(state, info)
 		self._needRecompute = false
 	end
 
-	-- Compressed map projection: focus = body centre; scale = info.mapScale.
 	local focus = self._origin:ToRender(Orbit.vec(0, 0, 0))
 	local s = info.mapScale or 1
 	local function project(sp)
 		return focus + Vector3.new(sp.x, sp.y, sp.z) * s
 	end
-
-	local thickness = Config.RENDER.mapViewRadius * 0.025
+	local thickness = Config.RENDER.mapViewRadius * 0.02
+	local mk = thickness * 2.6
 
 	local pts = self._simPath
 	local n = #pts
@@ -165,11 +157,9 @@ function MapViewController:_update(state, info)
 		render[i] = project(pts[i])
 	end
 
-	local segs = self._segments
-	for i = 1, #segs do
-		local a = render[i]
-		local b = render[i + 1]
-		local seg = segs[i]
+	for i = 1, #self._segments do
+		local a, b = render[i], render[i + 1]
+		local seg = self._segments[i]
 		if not b then
 			seg.Transparency = 1
 		else
@@ -184,7 +174,6 @@ function MapViewController:_update(state, info)
 		end
 	end
 
-	local mk = thickness * 3
 	self._craftMarker.Transparency = 0
 	self._craftMarker.Size = Vector3.new(mk, mk, mk)
 	self._craftMarker.CFrame = CFrame.new(project(state.position))

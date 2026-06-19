@@ -1,18 +1,19 @@
 --[[
 	InputController
-	Owner of: all player input state (throttle, thrust mode, time warp, camera
-	orbit, and the map/flight view toggle).
+	Owner of: all player input.
 
-	Other systems read this state at runtime; nobody else touches input.
-
-	Controls:
+	Flight controls (KSP-style):
+	  W / S .......... pitch (nose down / up)
+	  A / D .......... yaw (nose left / right)
+	  Q / E .......... roll
 	  Shift / Ctrl ... throttle up / down (hold)
-	  Z / X .......... throttle full / cut
-	  1 2 3 4 ........ thrust: Prograde / Retrograde / RadialOut / RadialIn
-	  . / , .......... time warp up / down (engine off only)
-	  M .............. toggle Map view / Flight (chase) view
-	  RMB + drag ..... orbit the camera
-	  Mouse wheel .... zoom
+	  X .............. cut throttle
+	  1 2 3 4 5 ...... auto-orient (SAS): Prograde / Retrograde / RadialOut / RadialIn / Ascent
+	  Space .......... stage
+	  . / , .......... time warp up / down
+	  M .............. Map / Flight view
+	  B .............. VAB / Flight
+	  RMB + drag ..... look around    Wheel ... zoom
 ]]
 
 local UserInputService = game:GetService("UserInputService")
@@ -28,58 +29,53 @@ local InputController = {}
 
 function InputController:Init()
 	self._throttle = 0
-	self._thrustMode = "Ascent"
+	self._sas = "Ascent" -- Prograde/Retrograde/RadialOut/RadialIn/Ascent/Manual
 	self._warpIndex = 1
 	self._warpLevels = Config.TIMEWARP.levels
 	self._mapMode = Config.CAMERA.startInMapView and true or false
 	self._rmbDown = false
 	self._cam = {
-		azimuth = Config.CAMERA.defaultAzimuth,
-		elevation = Config.CAMERA.defaultElevation,
+		azimuth = 0,
+		elevation = math.rad(12),
 		distance = Config.CAMERA.distanceDefault,
 		mapZoom = 1,
 	}
-	-- Discrete action events (created in Init so others can connect in Start).
 	self.StagePressed = Signal.new()
 	self.ToggleModePressed = Signal.new()
 end
 
 function InputController:Start()
-	local inputCfg = Config.INPUT
 	local camCfg = Config.CAMERA
 
-	-- On launch, reset to a clean ascent: no throttle, no warp, autopilot mode.
 	Registry:Get("GameModeController").ModeChanged:Connect(function(m)
 		if m == "Flight" then
 			self._throttle = 0
 			self._warpIndex = 1
-			self._thrustMode = "Ascent"
+			self._sas = "Ascent"
+			self._cam.azimuth = 0
+			self._cam.elevation = math.rad(12)
 		end
 	end)
 
-	UserInputService.InputBegan:Connect(function(input, gameProcessed)
-		if gameProcessed then
+	UserInputService.InputBegan:Connect(function(input, gp)
+		if gp then
 			return
 		end
 		if input.UserInputType == Enum.UserInputType.Keyboard then
 			local k = input.KeyCode
-			if k == Enum.KeyCode.Z then
-				self._throttle = 1
-				self._warpIndex = 1
-			elseif k == Enum.KeyCode.X then
+			if k == Enum.KeyCode.X then
 				self._throttle = 0
 			elseif k == Enum.KeyCode.One then
-				self._thrustMode = "Prograde"
+				self._sas = "Prograde"
 			elseif k == Enum.KeyCode.Two then
-				self._thrustMode = "Retrograde"
+				self._sas = "Retrograde"
 			elseif k == Enum.KeyCode.Three then
-				self._thrustMode = "RadialOut"
+				self._sas = "RadialOut"
 			elseif k == Enum.KeyCode.Four then
-				self._thrustMode = "RadialIn"
+				self._sas = "RadialIn"
 			elseif k == Enum.KeyCode.Five then
-				self._thrustMode = "Ascent"
+				self._sas = "Ascent"
 			elseif k == Enum.KeyCode.Period then
-				-- Warp up only while coasting.
 				if self._throttle <= 0 then
 					self._warpIndex = math.min(#self._warpLevels, self._warpIndex + 1)
 				end
@@ -105,17 +101,15 @@ function InputController:Start()
 		end
 	end)
 
-	UserInputService.InputChanged:Connect(function(input, gameProcessed)
-		if input.UserInputType == Enum.UserInputType.MouseMovement then
-			if self._rmbDown then
-				self._cam.azimuth = self._cam.azimuth - input.Delta.X * camCfg.orbitSensitivity
-				self._cam.elevation = math.clamp(
-					self._cam.elevation - input.Delta.Y * camCfg.orbitSensitivity,
-					camCfg.minElevation,
-					camCfg.maxElevation
-				)
-			end
-		elseif input.UserInputType == Enum.UserInputType.MouseWheel and not gameProcessed then
+	UserInputService.InputChanged:Connect(function(input, gp)
+		if input.UserInputType == Enum.UserInputType.MouseMovement and self._rmbDown then
+			self._cam.azimuth = self._cam.azimuth - input.Delta.X * camCfg.orbitSensitivity
+			self._cam.elevation = math.clamp(
+				self._cam.elevation - input.Delta.Y * camCfg.orbitSensitivity,
+				camCfg.minElevation,
+				camCfg.maxElevation
+			)
+		elseif input.UserInputType == Enum.UserInputType.MouseWheel and not gp then
 			local factor = 1 - input.Position.Z * camCfg.zoomSensitivity
 			if self._mapMode then
 				self._cam.mapZoom = math.clamp(self._cam.mapZoom * factor, camCfg.mapZoomMin, camCfg.mapZoomMax)
@@ -126,56 +120,61 @@ function InputController:Start()
 		end
 	end)
 
-	-- Continuous throttle ramp from held Shift / Ctrl.
 	RunService:BindToRenderStep("RocketSim_Input", Enum.RenderPriority.Input.Value, function(dt)
 		local up = UserInputService:IsKeyDown(Enum.KeyCode.LeftShift)
 			or UserInputService:IsKeyDown(Enum.KeyCode.RightShift)
 		local down = UserInputService:IsKeyDown(Enum.KeyCode.LeftControl)
 			or UserInputService:IsKeyDown(Enum.KeyCode.RightControl)
-
-		local delta = 0
-		if up then
-			delta += inputCfg.throttleRate * dt
-		end
-		if down then
-			delta -= inputCfg.throttleRate * dt
-		end
+		local delta = (up and Config.INPUT.throttleRate * dt or 0) - (down and Config.INPUT.throttleRate * dt or 0)
 		if delta ~= 0 then
 			self._throttle = math.clamp(self._throttle + delta, 0, 1)
 		end
-
-		-- No warp while the engine is firing.
 		if self._throttle > 0 then
 			self._warpIndex = 1
 		end
 	end)
 end
 
-function InputController:GetThrottle(): number
+local function keyAxis(neg, pos)
+	local v = 0
+	if UserInputService:IsKeyDown(pos) then
+		v += 1
+	end
+	if UserInputService:IsKeyDown(neg) then
+		v -= 1
+	end
+	return v
+end
+
+-- Manual attitude intent. If any of WASDQE is held, control becomes Manual.
+function InputController:GetAttitudeInput()
+	local pitch = keyAxis(Enum.KeyCode.S, Enum.KeyCode.W)
+	local yaw = keyAxis(Enum.KeyCode.D, Enum.KeyCode.A)
+	local roll = keyAxis(Enum.KeyCode.E, Enum.KeyCode.Q)
+	if pitch ~= 0 or yaw ~= 0 or roll ~= 0 then
+		self._sas = "Manual"
+	end
+	return pitch, yaw, roll
+end
+
+function InputController:GetThrottle()
 	return self._throttle
 end
-
-function InputController:GetThrustMode(): string
-	return self._thrustMode
+function InputController:GetSAS()
+	return self._sas
 end
-
-function InputController:GetTimeWarp(): number
+function InputController:GetTimeWarp()
 	return self._warpLevels[self._warpIndex]
 end
-
-function InputController:GetMapMode(): boolean
+function InputController:GetMapMode()
 	return self._mapMode
 end
-
--- Live camera orbit table { azimuth, elevation, distance, mapZoom }.
 function InputController:GetCameraOrbit()
 	return self._cam
 end
-
 function InputController:GetStageSignal()
 	return self.StagePressed
 end
-
 function InputController:GetToggleModeSignal()
 	return self.ToggleModePressed
 end

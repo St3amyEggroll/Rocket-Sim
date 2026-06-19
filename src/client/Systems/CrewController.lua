@@ -127,9 +127,16 @@ function CrewController:_ride(state, info)
 		return
 	end
 
-	-- Align "up" with the rocket's pointing direction so the rider rides with it.
+	-- Ride along the rocket's nose (pointDir is a Vector3 = attitude.LookVector).
 	local pd = info and info.pointDir
-	local up = pd and Vector3.new(pd.x, pd.y, pd.z) or Vector3.new(state.position.x, state.position.y, state.position.z)
+	local up
+	if typeof(pd) == "Vector3" then
+		up = pd
+	elseif pd then
+		up = Vector3.new(pd.x, pd.y, pd.z)
+	else
+		up = Vector3.new(state.position.x, state.position.y, state.position.z)
+	end
 	up = (up.Magnitude > 1e-3) and up.Unit or Vector3.yAxis
 
 	local look = up:Cross(Vector3.xAxis)

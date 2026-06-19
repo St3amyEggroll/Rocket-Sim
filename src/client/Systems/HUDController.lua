@@ -139,7 +139,7 @@ function HUDController:_build(parent)
 	hint.TextSize = 14
 	hint.TextColor3 = Color3.fromRGB(175, 185, 200)
 	hint.Text =
-		"Shift Throttle up  5 Ascent autopilot  1-4 Pro/Retro/RadOut/RadIn  Space Stage  . / , Warp  M Map  B Build (VAB)  RMB Orbit  Wheel Zoom"
+		"WASD/QE Steer   Shift/Ctrl Throttle   1-5 SAS Pro/Retro/RadOut/RadIn/Ascent   Space Stage   . / , Warp   M Map   B Build   RMB Look   Wheel Zoom"
 	hint.Parent = gui
 end
 
@@ -176,7 +176,7 @@ function HUDController:_update(state, info)
 	end
 
 	L.throttle.Text = "Throttle:  " .. math.floor(info.throttle * 100 + 0.5) .. "%"
-	L.thrustMode.Text = "Thrust:    " .. tostring(info.thrustMode)
+	L.thrustMode.Text = "SAS:       " .. tostring(info.sas)
 	L.warp.Text = "Warp:      " .. (info.warp or 1) .. "x"
 end
 

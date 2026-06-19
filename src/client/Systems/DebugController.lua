@@ -90,7 +90,7 @@ function DebugController:Start()
 end
 
 function DebugController:_text()
-	local lines = { "BUILD P3.4 (debug)" }
+	local lines = { "BUILD P3.5 (debug)" }
 	lines[#lines + 1] = "RS frames: " .. self._frames .. "   (` to hide)"
 
 	local Flight = Registry:GetOrNil("FlightController")
@@ -120,7 +120,7 @@ function DebugController:_text()
 		lines[#lines + 1] = "map mode:  " .. tostring(Input:GetMapMode())
 	end
 
-	lines[#lines + 1] = modelPos("Body_" .. Config.BODY.name)
+	lines[#lines + 1] = modelPos("PlanetProxy")
 	lines[#lines + 1] = modelPos("Craft")
 	lines[#lines + 1] = modelPos("Rider")
 
@@ -128,7 +128,7 @@ function DebugController:_text()
 	if cam then
 		lines[#lines + 1] = string.format("cam type:  %s", cam.CameraType.Name)
 		lines[#lines + 1] = "cam pos:   " .. v3str(cam.CFrame.Position)
-		local body = Workspace:FindFirstChild("Body_" .. Config.BODY.name)
+		local body = Workspace:FindFirstChild("PlanetProxy")
 		local craft = Workspace:FindFirstChild("Craft")
 		if body then
 			lines[#lines + 1] = string.format("cam->body: %.0f", (cam.CFrame.Position - body:GetPivot().Position).Magnitude)

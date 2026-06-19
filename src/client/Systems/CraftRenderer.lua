@@ -1,13 +1,13 @@
 --[[
 	CraftRenderer
-	Owner of: the rendered rocket model, the central body, and the launch pad.
+	Owner of: the rendered planet, launch pad, and rocket.
 
-	Level-of-detail so the body is never culled:
-	  * Chase view: the body is drawn at most Config.RENDER.bodyFlightCap studs from
-	    the camera. Beyond that it is pulled in and shrunk (angular size preserved)
-	    and its continents are dropped - "quality goes down" but it stays visible.
-	  * Map view: the whole scene is compressed by info.mapScale around the body so
-	    the orbit always fits inside render range; the rocket/pad are parked.
+	The planet is a REAL Ball part rendered CAMERA-RELATIVE: each frame it is placed
+	along the true direction to the body, at a distance scaled so its angular size
+	matches reality. Because it is a normal, close part it can never be culled, yet
+	it shrinks naturally to a dot as you fly away. Continents share the body's seed
+	so the correct face shows as you orbit. Map view uses a small body at the
+	compressed focus instead.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -58,10 +58,7 @@ local function pointCFrame(posVec3, upVec3)
 	return CFrame.lookAt(posVec3, posVec3 + fwd.Unit, up)
 end
 
-function CraftRenderer:Init()
-	self._continents = {}
-	self._landShown = true
-end
+function CraftRenderer:Init() end
 
 function CraftRenderer:Start()
 	self._origin = Registry:Get("FloatingOriginController")
@@ -70,7 +67,8 @@ function CraftRenderer:Start()
 
 	self:_cleanupWorld()
 	self:_setupLighting()
-	self:_buildBody()
+	self:_buildPlanetProxy()
+	self:_buildMapPlanet()
 	self:_buildPad()
 	self:_rebuildCraft()
 
@@ -88,9 +86,9 @@ function CraftRenderer:_cleanupWorld()
 			inst:Destroy()
 		end
 	end
-	local baseplate = Workspace:FindFirstChild("Baseplate")
-	if baseplate then
-		baseplate:Destroy()
+	local bp = Workspace:FindFirstChild("Baseplate")
+	if bp then
+		bp:Destroy()
 	end
 	for _, inst in ipairs(Workspace:GetDescendants()) do
 		if inst:IsA("SpawnLocation") then
@@ -105,69 +103,80 @@ function CraftRenderer:_setupLighting()
 	Lighting.Brightness = 2.5
 	Lighting.Ambient = Color3.fromRGB(70, 72, 85)
 	Lighting.OutdoorAmbient = Color3.fromRGB(150, 150, 160)
-	Lighting.ExposureCompensation = 0
 	Lighting.GlobalShadows = false
 	Lighting.EnvironmentDiffuseScale = 0.4
 	Lighting.EnvironmentSpecularScale = 0.4
 	Lighting.FogEnd = 1e9
 end
 
-function CraftRenderer:_buildBody()
+-- Continent surface directions, shared between the flight proxy and (visually)
+-- the real planet so the correct face shows.
+function CraftRenderer:_continentDirs()
+	local dirs = {}
+	local rng = Random.new(Config.BODY.continentSeed)
+	for _ = 1, Config.BODY.continents do
+		local d = Vector3.new(rng:NextNumber(-1, 1), rng:NextNumber(-1, 1), rng:NextNumber(-1, 1))
+		if d.Magnitude < 1e-3 then
+			d = Vector3.yAxis
+		end
+		dirs[#dirs + 1] = { dir = d.Unit, size = rng:NextNumber(0.28, 0.42) }
+	end
+	return dirs
+end
+
+function CraftRenderer:_buildPlanetProxy()
 	local body = Config.BODY
+	local pr = Config.RENDER.proxyRadius
 	local model = Instance.new("Model")
-	model.Name = "Body_" .. body.name
+	model.Name = "PlanetProxy"
 
 	local ocean = makePart(model, "Ocean", {
-		Size = Vector3.new(1, 1, 1),
+		Shape = Enum.PartType.Ball,
+		Size = Vector3.new(pr * 2, pr * 2, pr * 2),
 		Color = body.oceanColor,
 		Material = Enum.Material.SmoothPlastic,
 		CFrame = CFrame.new(0, 0, 0),
 	})
-	local mesh = Instance.new("SpecialMesh")
-	mesh.MeshType = Enum.MeshType.Sphere
-	mesh.Scale = Vector3.new(body.radius * 2, body.radius * 2, body.radius * 2)
-	mesh.Parent = ocean
 	model.PrimaryPart = ocean
-	self._ocean = ocean
-	self._oceanMesh = mesh
 
-	local rng = Random.new(body.continentSeed)
-	local slabThickness = body.radius * 0.05
-	local function slab(dir, size, color, material)
-		dir = dir.Unit
-		local center = dir * (body.radius + slabThickness * 0.35)
-		local part = makePart(model, "Land", {
-			Size = Vector3.new(size, size, slabThickness),
-			Color = color,
-			Material = material,
-			CFrame = CFrame.lookAt(center, center + dir),
+	for _, c in ipairs(self:_continentDirs()) do
+		makePart(model, "Land", {
+			Shape = Enum.PartType.Ball,
+			Size = Vector3.new(pr * c.size * 2, pr * c.size * 2, pr * c.size * 0.6),
+			Color = body.landColor,
+			Material = Enum.Material.Grass,
+			CFrame = CFrame.lookAt(c.dir * pr, c.dir * pr * 2),
 		})
-		table.insert(self._continents, part)
 	end
-	for _ = 1, body.continents do
-		local dir = Vector3.new(rng:NextNumber(-1, 1), rng:NextNumber(-1, 1), rng:NextNumber(-1, 1))
-		if dir.Magnitude < 1e-3 then
-			dir = Vector3.yAxis
-		end
-		local tint = rng:NextInteger(-25, 25)
-		local c = body.landColor
-		slab(dir, rng:NextNumber(body.radius * 0.28, body.radius * 0.45), Color3.fromRGB(
-			math.clamp(c.R * 255 + tint, 0, 255),
-			math.clamp(c.G * 255 + tint, 0, 255),
-			math.clamp(c.B * 255 + tint * 0.5, 0, 255)
-		), Enum.Material.Grass)
+	for _, pole in ipairs({ Vector3.yAxis, -Vector3.yAxis }) do
+		makePart(model, "Ice", {
+			Shape = Enum.PartType.Ball,
+			Size = Vector3.new(pr * 0.7, pr * 0.7, pr * 0.4),
+			Color = body.iceColor,
+			Material = Enum.Material.Glacier,
+			CFrame = CFrame.lookAt(pole * pr, pole * pr * 2),
+		})
 	end
-	slab(Vector3.yAxis, body.radius * 0.5, body.iceColor, Enum.Material.Glacier)
-	slab(-Vector3.yAxis, body.radius * 0.5, body.iceColor, Enum.Material.Glacier)
 
 	model.Parent = Workspace
-	self._bodyModel = model
+	self._planetProxy = model
+end
+
+function CraftRenderer:_buildMapPlanet()
+	local r = Config.RENDER.mapPlanetRadius
+	self._mapPlanet = makePart(Workspace, "MapPlanet", {
+		Shape = Enum.PartType.Ball,
+		Size = Vector3.new(r * 2, r * 2, r * 2),
+		Color = Config.BODY.oceanColor,
+		Material = Enum.Material.SmoothPlastic,
+		CFrame = CFrame.new(PARK),
+	})
 end
 
 function CraftRenderer:_buildPad()
 	self._pad = makePart(Workspace, "LaunchPad", {
 		Shape = Enum.PartType.Cylinder,
-		Size = Vector3.new(4, 44, 44),
+		Size = Vector3.new(6, 90, 90),
 		Color = Color3.fromRGB(90, 92, 100),
 		Material = Enum.Material.Metal,
 	})
@@ -182,11 +191,7 @@ function CraftRenderer:_rebuildCraft()
 
 	local model = Instance.new("Model")
 	model.Name = "Craft"
-	local root = makePart(model, "Root", {
-		Size = Vector3.new(0.2, 0.2, 0.2),
-		Transparency = 1,
-		CFrame = CFrame.new(0, 0, 0),
-	})
+	local root = makePart(model, "Root", { Size = Vector3.new(0.2, 0.2, 0.2), Transparency = 1, CFrame = CFrame.new(0, 0, 0) })
 	model.PrimaryPart = root
 
 	local y = 0
@@ -198,7 +203,6 @@ function CraftRenderer:_rebuildCraft()
 		local mat = (def.category == "engine") and Enum.Material.Metal or Enum.Material.SmoothPlastic
 		local center = y + def.height / 2
 		addCylinder(model, def.name, def.height, def.radius, def.color, mat, center)
-
 		if def.shape == "pod" then
 			makePart(model, "Dome", {
 				Shape = Enum.PartType.Ball,
@@ -206,13 +210,6 @@ function CraftRenderer:_rebuildCraft()
 				Color = def.color,
 				Material = Enum.Material.SmoothPlastic,
 				CFrame = CFrame.new(0, y + def.height, 0),
-			})
-			makePart(model, "Window", {
-				Shape = Enum.PartType.Ball,
-				Size = Vector3.new(1.6, 1.6, 1.6),
-				Color = Color3.fromRGB(120, 200, 255),
-				Material = Enum.Material.Neon,
-				CFrame = CFrame.new(0, center, -def.radius * 0.9),
 			})
 		elseif def.shape == "engine" then
 			addCylinder(model, "Nozzle", def.height * 0.5, def.radius * 0.66, Color3.fromRGB(40, 42, 48), Enum.Material.Metal, y - def.height * 0.1)
@@ -230,7 +227,7 @@ function CraftRenderer:_rebuildCraft()
 	})
 	local light = Instance.new("PointLight")
 	light.Color = Color3.fromRGB(255, 160, 70)
-	light.Range = 36
+	light.Range = 40
 	light.Brightness = 5
 	light.Enabled = false
 	light.Parent = flame
@@ -241,48 +238,46 @@ function CraftRenderer:_rebuildCraft()
 	self._flameLight = light
 end
 
-function CraftRenderer:_setLand(shown)
-	if shown == self._landShown then
-		return
-	end
-	self._landShown = shown
-	for _, part in ipairs(self._continents) do
-		part.Transparency = shown and 0 or 1
-	end
-end
-
 function CraftRenderer:_render(state, info)
 	local origin = self._origin
 	local R = Config.BODY.radius
+	local focus = origin:ToRender(Orbit.vec(0, 0, 0))
 	local mapMode = info and info.mapMode
-	local focusRender = origin:ToRender(Orbit.vec(0, 0, 0))
 
 	if mapMode then
-		-- Whole scene compressed around the body: body at focus, scaled down but
-		-- never below a visible size.
-		local s = info.mapScale or 1
-		local renderedR = math.max(R * s, Config.RENDER.mapViewRadius * Config.RENDER.bodyMapMinFrac)
-		self._bodyModel:PivotTo(CFrame.new(focusRender))
-		self._oceanMesh.Scale = Vector3.new(renderedR * 2, renderedR * 2, renderedR * 2)
-		self:_setLand(false)
+		self._planetProxy:PivotTo(CFrame.new(PARK))
+		self._mapPlanet:PivotTo(CFrame.new(focus))
 		self._pad:PivotTo(CFrame.new(PARK))
 		self._craft:PivotTo(CFrame.new(PARK))
 		return
 	end
 
-	-- Chase view: the body is large enough to render from far, so draw it at its
-	-- TRUE position and full size. It shrinks realistically with distance (down to
-	-- a dot relative to the craft) instead of being culled.
-	self._bodyModel:PivotTo(CFrame.new(focusRender))
-	self._oceanMesh.Scale = Vector3.new(R * 2, R * 2, R * 2)
-	self:_setLand(true)
+	self._mapPlanet:PivotTo(CFrame.new(PARK))
 
+	-- Camera-relative planet proxy.
+	local camPos = Workspace.CurrentCamera and Workspace.CurrentCamera.CFrame.Position or focus
+	local toBody = focus - camPos
+	local mag = toBody.Magnitude
+	if mag < 1e-3 then
+		toBody = Vector3.new(0, -1, 0)
+		mag = 1
+	end
+	local D = math.max(mag, R)
+	local dir = toBody / mag
+	local proxyDist = math.clamp(
+		Config.RENDER.proxyRadius * D / R,
+		Config.RENDER.proxyDistMin,
+		Config.RENDER.proxyDistMax
+	)
+	self._planetProxy:PivotTo(CFrame.new(camPos + dir * proxyDist))
+
+	-- Pad + rocket at true positions.
 	local craftRender = origin:ToRender(state.position)
 	self._pad:PivotTo(CFrame.new(origin:ToRender(self._padSim)))
 
-	-- Rocket.
 	local pd = info and info.pointDir or Orbit.vec(0, 1, 0)
-	self._craft:PivotTo(pointCFrame(craftRender, Vector3.new(pd.x, pd.y, pd.z)))
+	self._craft:PivotTo(pointCFrame(craftRender, Vector3.new(pd.x or pd.X, pd.y or pd.Y, pd.z or pd.Z)))
+
 	local throttle = (info and info.throttle) or 0
 	if info and info.powered and throttle > 0 then
 		self._flame.Transparency = 0.2

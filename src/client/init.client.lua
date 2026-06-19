@@ -24,26 +24,30 @@ local initOrder = {
 	"FloatingOriginController",
 	"InputController",
 	"FlightController",
+	"CameraController",
 	"CraftRenderer",
 	"CrewController",
 	"MapViewController",
-	"CameraController",
+	"NavballController",
 	"VABController",
 	"HUDController",
 }
 
 -- Listeners must Start before the flight loop begins firing events.
 -- DebugController starts first so its overlay is up even if something else fails.
+-- CameraController starts before CraftRenderer so the planet proxy uses the
+-- current frame's camera position.
 local startOrder = {
 	"DebugController",
 	"GameModeController",
 	"VehicleController",
 	"FloatingOriginController",
 	"InputController",
+	"CameraController",
 	"CraftRenderer",
 	"CrewController",
 	"MapViewController",
-	"CameraController",
+	"NavballController",
 	"VABController",
 	"HUDController",
 	"FlightController",
@@ -81,4 +85,4 @@ for _, name in ipairs(startOrder) do
 	end
 end
 
-print("[RocketSim] Client systems started -- build P3.4 (20k planet, realistic shrink).")
+print("[RocketSim] Client systems started -- build P3.5 (WASD + navball + planet proxy + map).")
