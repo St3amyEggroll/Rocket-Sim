@@ -90,7 +90,7 @@ function DebugController:Start()
 end
 
 function DebugController:_text()
-	local lines = { "BUILD P3.9 (debug)" }
+	local lines = { "BUILD P3.10 (debug)" }
 	lines[#lines + 1] = "RS frames: " .. self._frames .. "   (` to hide)"
 
 	local Flight = Registry:GetOrNil("FlightController")
@@ -120,7 +120,12 @@ function DebugController:_text()
 		lines[#lines + 1] = "map mode:  " .. tostring(Input:GetMapMode())
 	end
 
-	lines[#lines + 1] = "planet:    Terrain ball @ origin"
+	local Terrain = Registry:GetOrNil("TerrainController")
+	if Terrain and Terrain.GetLODState then
+		lines[#lines + 1] = "planet:    " .. Terrain:GetLODState()
+	else
+		lines[#lines + 1] = "planet:    Ball @ origin"
+	end
 	lines[#lines + 1] = modelPos("Craft")
 	lines[#lines + 1] = modelPos("Rider")
 

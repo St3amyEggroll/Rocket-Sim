@@ -18,6 +18,22 @@ Config.BODY = {
 	hillColor = Color3.fromRGB(74, 124, 66),
 }
 
+-- Streamed terrain crust. The planet is too big to voxel-fill whole (~65M
+-- voxels), so we lay a curved crust of real Roblox terrain only around the
+-- sub-craft surface point. It follows the rocket over the sphere and is cleared
+-- when the rocket climbs away, at which point the grass Ball is the LOD.
+Config.TERRAIN = {
+	capHalfWidth = 380, -- crust patch reaches this many studs from its centre
+	capSpacing = 30, -- grid step between crust fill-balls
+	capBallRadius = 27, -- fill-ball radius (overlaps neighbours into a shell)
+	reliefAmp = 16, -- +/- studs of rolling-hill relief on the crust
+	reliefFreq = 0.012, -- Perlin frequency over the surface (smaller = broader hills)
+	streamInAlt = 550, -- at/below this altitude the crust is present
+	streamOutAlt = 800, -- above this altitude the crust is cleared (Ball LOD only)
+	regenDistance = 240, -- surface arc the craft must travel before the crust re-lays
+	ballsPerFrame = 26, -- crust fill-balls placed per frame while streaming in
+}
+
 Config.CRAFT = {
 	radius = 14,
 	riderHeight = 7,
