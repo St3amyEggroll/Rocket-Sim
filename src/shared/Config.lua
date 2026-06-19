@@ -71,11 +71,11 @@ Config.CAMERA = {
 -- can never be culled and always shows at the correct angular size.
 Config.RENDER = {
 	proxyRadius = 1000, -- fixed render radius of the planet proxy ball (<=1024)
-	proxyDistMin = 1000, -- placement distance when you're at the surface
-	proxyDistMax = 9000, -- never place it farther than this (stays in render range)
-	mapPlanetRadius = 700, -- planet ball size in the (compressed) map view
-	mapViewRadius = 2800, -- orbit is drawn within this radius of the body in map
-	mapCamMultiplier = 2.3,
+	proxyDistMin = 1000,
+	proxyDistMax = 6000, -- keep the proxy comfortably inside render range
+	mapPlanetRadius = 900,
+	mapViewRadius = 3000,
+	mapCamMultiplier = 2.0,
 	parkY = 400000,
 }
 

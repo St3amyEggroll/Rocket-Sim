@@ -2,9 +2,14 @@
 	CameraController
 	Owner of: the Scriptable camera.
 
-	Flight (chase): sits behind the craft's nose (its current attitude) and looks
-	forward, so manual WASD steering is intuitive. RMB orbits the view; wheel zooms.
-	Map: frames the (compressed) body + orbit at a fixed, render-safe distance.
+	Flight: a KSP-style gravity/orbit-aligned camera. The camera's UP is the local
+	vertical (radial), so the horizon stays level and the planet stays DOWN and on
+	screen at any altitude. It trails the craft's horizontal velocity, which lies
+	in the orbital plane, so the view is naturally coplanar with the orbit. The
+	craft rotates freely within the view (read attitude off the navball). RMB
+	orbits, wheel zooms.
+
+	Map: frames the compressed body + orbit at a fixed, render-safe distance.
 ]]
 
 local Workspace = game:GetService("Workspace")
@@ -36,6 +41,8 @@ function CameraController:Start()
 		cam.FieldOfView = Config.CAMERA.fieldOfView
 	end
 
+	self._lastFwd = Vector3.zAxis
+
 	Flight:GetUpdatedSignal():Connect(function(state, info)
 		self:_update(state, info)
 	end)
@@ -65,17 +72,30 @@ function CameraController:_update(state, info)
 		return
 	end
 
-	local att = info and info.attitude or CFrame.lookAt(Vector3.zero, Vector3.xAxis, Vector3.yAxis)
-	local nose = att.LookVector
-	local up = att.UpVector
-	local craftRender = self._origin:ToRender(state.position)
+	-- Gravity-aligned chase: up = local vertical (radial).
+	local p = state.position
+	local up = Vector3.new(p.x, p.y, p.z)
+	up = (up.Magnitude > 1e-3) and up.Unit or Vector3.yAxis
 
-	local behind = -nose
+	-- Horizontal forward = velocity projected onto the local horizon (lies in the
+	-- orbital plane). Fall back to the nose, then to the last good forward.
+	local function horiz(v)
+		local h = v - up * v:Dot(up)
+		return (h.Magnitude > 1e-3) and h.Unit or nil
+	end
+	local v = state.velocity
+	local fwd = horiz(Vector3.new(v.x, v.y, v.z))
+	if not fwd then
+		local nose = info and info.attitude and info.attitude.LookVector
+		fwd = (nose and horiz(nose)) or self._lastFwd
+	end
+	self._lastFwd = fwd
+
+	local craftRender = self._origin:ToRender(p)
+	local behind = CFrame.fromAxisAngle(up, orbit.azimuth) * (-fwd)
 	local offsetDir = behind * math.cos(orbit.elevation) + up * math.sin(orbit.elevation)
-	offsetDir = CFrame.fromAxisAngle(up, orbit.azimuth) * offsetDir
-
-	local camPos = craftRender + offsetDir * orbit.distance + up * (orbit.distance * 0.12)
-	cam.CFrame = CFrame.lookAt(camPos, craftRender + nose * (orbit.distance * 0.15))
+	local camPos = craftRender + offsetDir * orbit.distance
+	cam.CFrame = CFrame.lookAt(camPos, craftRender, up)
 end
 
 return CameraController

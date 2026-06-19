@@ -36,7 +36,7 @@ function InputController:Init()
 	self._rmbDown = false
 	self._cam = {
 		azimuth = 0,
-		elevation = math.rad(12),
+		elevation = math.rad(18),
 		distance = Config.CAMERA.distanceDefault,
 		mapZoom = 1,
 	}
@@ -53,7 +53,7 @@ function InputController:Start()
 			self._warpIndex = 1
 			self._sas = "Ascent"
 			self._cam.azimuth = 0
-			self._cam.elevation = math.rad(12)
+			self._cam.elevation = math.rad(18)
 		end
 	end)
 
