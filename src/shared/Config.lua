@@ -13,8 +13,8 @@ local Config = {}
 -- The central body. It lives at the SIM origin (0,0,0).
 Config.BODY = {
 	name = "Terra",
-	mu = 5.92e8,
-	radius = 3500, -- surface radius (studs) - a bigger, more imposing planet
+	mu = 1.6e10, -- surface gravity ~40 studs/s^2 at the 20k radius
+	radius = 20000, -- surface radius (studs) - a big planet that renders from far
 
 	oceanColor = Color3.fromRGB(38, 92, 158),
 	landColor = Color3.fromRGB(74, 128, 74),
@@ -32,10 +32,8 @@ Config.START = {
 -- Phase 3: build in the VAB, then Launch from the pad and fly to orbit.
 Config.LAUNCH = {
 	defaultDesign = { "EngineMain", "TankL", "TankL", "Pod" }, -- bottom -> top
-	-- Ascent autopilot gravity turn: pitch from straight up to horizontal between
-	-- these altitudes.
-	turnStartAlt = 250,
-	turnEndAlt = 3200,
+	turnStartAlt = 1500,
+	turnEndAlt = 12000,
 }
 
 -- The test craft (a small rocket; infinite fuel until Phase 3).
@@ -62,13 +60,13 @@ Config.RENDER = {
 	mapViewRadius = 3000,
 	bodyMapMinFrac = 0.16, -- body never smaller than this fraction of mapViewRadius
 	mapCamMultiplier = 2.4,
-	parkY = 50000,
+	parkY = 400000,
 }
 
 Config.FLOATING_ORIGIN = {
-	-- Large: in this compact world coordinates stay small, so we avoid per-frame
-	-- rebasing (which caused jitter). Rebasing still kicks in for very far orbits.
-	rebaseThreshold = 60000,
+	-- Coordinates stay well within float precision for normal orbits, so we avoid
+	-- per-frame rebasing (which caused jitter); it only kicks in for huge orbits.
+	rebaseThreshold = 150000,
 }
 
 Config.INPUT = {
@@ -81,9 +79,9 @@ Config.TIMEWARP = {
 
 Config.CAMERA = {
 	-- Chase ("flight") view: close on the craft + rider (default so you see it).
-	distanceDefault = 90,
+	distanceDefault = 120,
 	distanceMin = 20,
-	distanceMax = 9000,
+	distanceMax = 20000,
 	startInMapView = false,
 
 	-- Map view: framed on the body, pulled back to fit the orbit.

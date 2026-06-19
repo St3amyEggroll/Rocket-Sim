@@ -270,29 +270,15 @@ function CraftRenderer:_render(state, info)
 		return
 	end
 
-	-- Chase view: body LOD so it is always visible within render range AND never
-	-- shrinks below a minimum on-screen size (so it can't fade out when far / when
-	-- you zoom out).
-	local cam = Workspace.CurrentCamera
-	local camPos = cam and cam.CFrame.Position or focusRender
-	local toBody = focusRender - camPos
-	local D = math.max(toBody.Magnitude, 1)
-	local cap = Config.RENDER.bodyFlightCap
-	local d = math.min(D, cap)
-	local baseScale = d / D -- preserves true angular size
-	local minScale = (Config.RENDER.bodyMinAngular * d) / R -- floor on apparent size
-	local scale = math.max(baseScale, minScale)
-	self._bodyModel:PivotTo(CFrame.new(camPos + (toBody / D) * d))
-	self._oceanMesh.Scale = Vector3.new(R * 2 * scale, R * 2 * scale, R * 2 * scale)
-	self:_setLand(baseScale > 0.999)
+	-- Chase view: the body is large enough to render from far, so draw it at its
+	-- TRUE position and full size. It shrinks realistically with distance (down to
+	-- a dot relative to the craft) instead of being culled.
+	self._bodyModel:PivotTo(CFrame.new(focusRender))
+	self._oceanMesh.Scale = Vector3.new(R * 2, R * 2, R * 2)
+	self:_setLand(true)
 
-	-- Pad: only worth showing when near the surface.
 	local craftRender = origin:ToRender(state.position)
-	if scale > 0.999 then
-		self._pad:PivotTo(CFrame.new(origin:ToRender(self._padSim)))
-	else
-		self._pad:PivotTo(CFrame.new(PARK))
-	end
+	self._pad:PivotTo(CFrame.new(origin:ToRender(self._padSim)))
 
 	-- Rocket.
 	local pd = info and info.pointDir or Orbit.vec(0, 1, 0)
