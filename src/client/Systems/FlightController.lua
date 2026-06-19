@@ -38,7 +38,8 @@ function FlightController:Init()
 	local body = Config.BODY
 	self._mu = body.mu
 	self._bodyRadius = body.radius
-	self._orbitAlt = Config.LAUNCH.orbitAltitude
+	self._turnStart = Config.LAUNCH.turnStartAlt
+	self._turnEnd = Config.LAUNCH.turnEndAlt
 
 	-- Start on the pad (VAB).
 	self._state = { position = Orbit.vec(body.radius, 0, 0), velocity = Orbit.vec(0, 0, 0) }
@@ -73,26 +74,41 @@ function FlightController:Start()
 end
 
 function FlightController:_onMode(mode)
-	if mode == "Flight" then
-		self._vehicle:ResetRuntime()
-		local r = self._bodyRadius + self._orbitAlt
-		self._state = {
-			position = Orbit.vec(r, 0, 0),
-			velocity = Orbit.vec(0, 0, Orbit.circularSpeed(r, self._mu)),
-		}
-		self._landed = false
-		self._status = "Coasting"
-	else
-		self._vehicle:ResetRuntime() -- rebuild the full rocket for the pad preview
-		self._state = { position = Orbit.vec(self._bodyRadius, 0, 0), velocity = Orbit.vec(0, 0, 0) }
-		self._landed = true
-		self._status = "VAB"
-	end
+	-- Both modes place the craft at rest on the launch pad; Flight just lets it
+	-- fly. Full fuel + full rocket on (re)entering either mode.
+	self._vehicle:ResetRuntime()
+	self._state = { position = Orbit.vec(self._bodyRadius, 0, 0), velocity = Orbit.vec(0, 0, 0) }
+	self._landed = true
+	self._status = (mode == "Flight") and "Landed" or "VAB"
 	self._origin:SetOrigin(self._state.position)
 end
 
+-- Ascent autopilot: pitch from radial-out to horizontal (east) as altitude grows.
+function FlightController:_ascentDirection(pos)
+	local rad = unit(pos)
+	if not rad then
+		return nil
+	end
+	local r = math.sqrt(pos.x * pos.x + pos.y * pos.y + pos.z * pos.z)
+	local alt = r - self._bodyRadius
+	local f = math.clamp((alt - self._turnStart) / (self._turnEnd - self._turnStart), 0, 1)
+	-- Horizontal "east" in the XZ plane: tangent = radial x +Y.
+	local tang = unit(Orbit.vec(
+		rad.y * 0 - rad.z * 1,
+		rad.z * 0 - rad.x * 0,
+		rad.x * 1 - rad.y * 0
+	)) or Orbit.vec(0, 0, 1)
+	return unit(Orbit.vec(
+		rad.x * (1 - f) + tang.x * f,
+		rad.y * (1 - f) + tang.y * f,
+		rad.z * (1 - f) + tang.z * f
+	)) or rad
+end
+
 function FlightController:_thrustDirection(mode, pos, vel)
-	if mode == "Retrograde" then
+	if mode == "Ascent" then
+		return self:_ascentDirection(pos)
+	elseif mode == "Retrograde" then
 		local d = unit(vel) or unit(pos)
 		return d and negate(d) or nil
 	elseif mode == "RadialOut" then

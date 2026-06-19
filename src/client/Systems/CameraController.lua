@@ -64,29 +64,48 @@ function CameraController:_update(state)
 	end
 
 	local orbit = self._input:GetCameraOrbit()
-	local cosE = math.cos(orbit.elevation)
-	local dir = Vector3.new(
-		math.cos(orbit.azimuth) * cosE,
-		math.sin(orbit.elevation),
-		math.sin(orbit.azimuth) * cosE
-	)
+	local p = state.position
 
-	local target, distance
 	if self._input:GetMapMode() then
-		-- Frame the body; pull back to fit the orbit.
-		target = self._origin:ToRender(Orbit.vec(0, 0, 0))
+		-- Map: frame the body; pull back to fit the orbit.
+		local target = self._origin:ToRender(Orbit.vec(0, 0, 0))
+		local cosE = math.cos(orbit.elevation)
+		local dir = Vector3.new(
+			math.cos(orbit.azimuth) * cosE,
+			math.sin(orbit.elevation),
+			math.sin(orbit.azimuth) * cosE
+		)
 		local readout = Orbit.getReadout(state, self._mu)
-		local p = state.position
 		local rNow = math.sqrt(p.x * p.x + p.y * p.y + p.z * p.z)
 		local apoR = (readout.apoapsis < math.huge) and (readout.apoapsis + self._bodyRadius) or rNow
 		local frameR = math.max(apoR, rNow, self._bodyRadius * 1.5)
-		distance = frameR * Config.CAMERA.mapFrameMultiplier * orbit.mapZoom
-	else
-		target = self._origin:ToRender(state.position)
-		distance = orbit.distance
+		local distance = frameR * Config.CAMERA.mapFrameMultiplier * orbit.mapZoom
+		cam.CFrame = CFrame.lookAt(target + dir * distance, target)
+		return
 	end
 
-	cam.CFrame = CFrame.lookAt(target + dir * distance, target)
+	-- Chase: orbit the camera in the craft's LOCAL frame (up = away from planet)
+	-- so the planet stays below / on screen as the craft goes around.
+	local craftRender = self._origin:ToRender(p)
+	local up = Vector3.new(p.x, p.y, p.z)
+	up = (up.Magnitude > 1e-3) and up.Unit or Vector3.yAxis
+
+	local v = state.velocity
+	local fwd = Vector3.new(v.x, v.y, v.z)
+	fwd = fwd - up * fwd:Dot(up)
+	if fwd.Magnitude < 1e-3 then
+		fwd = up:Cross(Vector3.xAxis)
+		if fwd.Magnitude < 1e-3 then
+			fwd = up:Cross(Vector3.zAxis)
+		end
+	end
+	fwd = fwd.Unit
+	local right = up:Cross(fwd)
+
+	local az, el = orbit.azimuth, orbit.elevation
+	local horiz = (-fwd) * math.cos(az) + right * math.sin(az)
+	local offsetDir = horiz * math.cos(el) + up * math.sin(el)
+	cam.CFrame = CFrame.lookAt(craftRender + offsetDir * orbit.distance, craftRender)
 end
 
 return CameraController

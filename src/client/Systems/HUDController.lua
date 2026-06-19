@@ -139,7 +139,7 @@ function HUDController:_build(parent)
 	hint.TextSize = 14
 	hint.TextColor3 = Color3.fromRGB(175, 185, 200)
 	hint.Text =
-		"Shift/Ctrl Throttle  Z/X Full/Cut  1-4 Pro/Retro/RadOut/RadIn  Space Stage  . / , Warp  M Map  B Build (VAB)  RMB Orbit  Wheel Zoom"
+		"Shift Throttle up  5 Ascent autopilot  1-4 Pro/Retro/RadOut/RadIn  Space Stage  . / , Warp  M Map  B Build (VAB)  RMB Orbit  Wheel Zoom"
 	hint.Parent = gui
 end
 

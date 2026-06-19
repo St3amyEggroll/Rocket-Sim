@@ -68,8 +68,9 @@ function CrewController:_prepRider(model)
 	if humanoid then
 		humanoid.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
 		humanoid.PlatformStand = true
+		-- Stop the humanoid state machine entirely (it is a frozen cosmetic prop).
 		pcall(function()
-			humanoid:SetStateEnabled(Enum.HumanoidStateType.Dead, false)
+			humanoid.EvaluateStateMachine = false
 		end)
 	end
 

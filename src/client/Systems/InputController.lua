@@ -22,12 +22,13 @@ local Shared = ReplicatedStorage:WaitForChild("Shared")
 
 local Config = require(Shared:WaitForChild("Config"))
 local Signal = require(Shared:WaitForChild("Signal"))
+local Registry = require(Shared:WaitForChild("Registry"))
 
 local InputController = {}
 
 function InputController:Init()
 	self._throttle = 0
-	self._thrustMode = "Prograde"
+	self._thrustMode = "Ascent"
 	self._warpIndex = 1
 	self._warpLevels = Config.TIMEWARP.levels
 	self._mapMode = Config.CAMERA.startInMapView and true or false
@@ -46,6 +47,15 @@ end
 function InputController:Start()
 	local inputCfg = Config.INPUT
 	local camCfg = Config.CAMERA
+
+	-- On launch, reset to a clean ascent: no throttle, no warp, autopilot mode.
+	Registry:Get("GameModeController").ModeChanged:Connect(function(m)
+		if m == "Flight" then
+			self._throttle = 0
+			self._warpIndex = 1
+			self._thrustMode = "Ascent"
+		end
+	end)
 
 	UserInputService.InputBegan:Connect(function(input, gameProcessed)
 		if gameProcessed then
@@ -66,6 +76,8 @@ function InputController:Start()
 				self._thrustMode = "RadialOut"
 			elseif k == Enum.KeyCode.Four then
 				self._thrustMode = "RadialIn"
+			elseif k == Enum.KeyCode.Five then
+				self._thrustMode = "Ascent"
 			elseif k == Enum.KeyCode.Period then
 				-- Warp up only while coasting.
 				if self._throttle <= 0 then

@@ -122,11 +122,13 @@ function CraftRenderer:_buildBody()
 	local slabThickness = body.radius * 0.05
 	local function slab(dir, size, color, material)
 		dir = dir.Unit
+		-- Sit a little proud of the surface so flat slabs don't z-fight the sphere.
+		local center = dir * (body.radius + slabThickness * 0.35)
 		makePart(model, "Land", {
 			Size = Vector3.new(size, size, slabThickness),
 			Color = color,
 			Material = material,
-			CFrame = CFrame.lookAt(dir * body.radius, dir * (body.radius * 2)),
+			CFrame = CFrame.lookAt(center, center + dir),
 		})
 	end
 	for _ = 1, body.continents do

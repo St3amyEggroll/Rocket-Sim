@@ -29,10 +29,13 @@ Config.START = {
 	altitude = 4000, -- studs above surface -> orbital radius = radius + altitude
 }
 
--- Phase 3: build in the VAB, then Launch into this orbit with the built rocket.
+-- Phase 3: build in the VAB, then Launch from the pad and fly to orbit.
 Config.LAUNCH = {
-	orbitAltitude = 4000, -- altitude the craft launches into
 	defaultDesign = { "EngineMain", "TankL", "TankL", "Pod" }, -- bottom -> top
+	-- Ascent autopilot gravity turn: pitch from straight up to horizontal between
+	-- these altitudes.
+	turnStartAlt = 250,
+	turnEndAlt = 3200,
 }
 
 -- The test craft (a small rocket; infinite fuel until Phase 3).
@@ -47,7 +50,9 @@ Config.FLIGHT = {
 }
 
 Config.FLOATING_ORIGIN = {
-	rebaseThreshold = 1500,
+	-- Large: in this compact world coordinates stay small, so we avoid per-frame
+	-- rebasing (which caused jitter). Rebasing still kicks in for very far orbits.
+	rebaseThreshold = 60000,
 }
 
 Config.INPUT = {
