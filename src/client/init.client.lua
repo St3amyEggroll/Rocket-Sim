@@ -19,6 +19,8 @@ local systemsFolder = script:WaitForChild("Systems")
 
 local initOrder = {
 	"DebugController",
+	"GameModeController",
+	"VehicleController",
 	"FloatingOriginController",
 	"InputController",
 	"FlightController",
@@ -26,6 +28,7 @@ local initOrder = {
 	"CrewController",
 	"MapViewController",
 	"CameraController",
+	"VABController",
 	"HUDController",
 }
 
@@ -33,12 +36,15 @@ local initOrder = {
 -- DebugController starts first so its overlay is up even if something else fails.
 local startOrder = {
 	"DebugController",
+	"GameModeController",
+	"VehicleController",
 	"FloatingOriginController",
 	"InputController",
 	"CraftRenderer",
 	"CrewController",
 	"MapViewController",
 	"CameraController",
+	"VABController",
 	"HUDController",
 	"FlightController",
 }
@@ -75,4 +81,4 @@ for _, name in ipairs(startOrder) do
 	end
 end
 
-print("[RocketSim] Client systems started -- build P2.5 (diagnostics overlay).")
+print("[RocketSim] Client systems started -- build P3.0 (VAB + staging + delta-v).")

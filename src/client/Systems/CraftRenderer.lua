@@ -1,15 +1,11 @@
 --[[
 	CraftRenderer
-	Owner of: the rendered rocket model and the central body model.
+	Owner of: the rendered rocket model, the central body, and the launch pad.
 
-	Listens to FlightController.Updated and re-pivots both through the floating
-	origin every frame. The rocket flies nose-forward (prograde) with its engine
-	flame at the back; the body is a lit planet with oceans, continents and ice.
-	Nothing here stores sim state - it only converts sim positions to render-space
-	Vector3s via the origin.
-
-	(Phase 1/2 also sets up the lighting here. A dedicated WorldRenderer can take
-	this over later.)
+	The rocket is built from VehicleController's ACTIVE parts (rebuilt when parts
+	change or a stage drops) and oriented each frame so it points along the
+	flight's pointDir, with its exhaust flame at the tail. The body is a lit planet
+	with oceans/continents/ice. Everything is placed through the floating origin.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -23,46 +19,59 @@ local Registry = require(Shared:WaitForChild("Registry"))
 
 local CraftRenderer = {}
 
--- Pick a "forward" (prograde) that is not parallel to "up" (radial), so the
--- orientation CFrame is always well defined.
-local function safeForward(up, forward)
-	if forward.Magnitude < 1e-3 or math.abs(forward.Unit:Dot(up)) > 0.99 then
-		local f = up:Cross(Vector3.xAxis)
-		if f.Magnitude < 1e-3 then
-			f = up:Cross(Vector3.zAxis)
-		end
-		return f.Unit
+local function makePart(parent, name, props)
+	local p = Instance.new("Part")
+	p.Name = name
+	p.Anchored = true
+	p.CanCollide = false
+	p.CanQuery = false
+	p.CanTouch = false
+	p.CastShadow = false
+	for k, v in pairs(props) do
+		p[k] = v
 	end
-	return forward.Unit
+	p.Parent = parent
+	return p
+end
+
+-- A vertical cylinder (length along the model's +Y), centred at local y.
+local function addCylinder(model, name, height, radius, color, material, y)
+	return makePart(model, name, {
+		Shape = Enum.PartType.Cylinder,
+		Size = Vector3.new(height, radius * 2, radius * 2),
+		Color = color,
+		Material = material,
+		CFrame = CFrame.new(0, y, 0) * CFrame.Angles(0, 0, math.rad(90)),
+	})
 end
 
 function CraftRenderer:Init()
 	self._craft = nil
 	self._body = nil
+	self._pad = nil
 	self._flame = nil
-	self._flameLight = nil
 end
 
 function CraftRenderer:Start()
 	self._origin = Registry:Get("FloatingOriginController")
+	self._vehicle = Registry:Get("VehicleController")
 	local Flight = Registry:Get("FlightController")
 
 	self:_cleanupWorld()
 	self:_setupLighting()
 	self:_buildBody()
-	self:_buildCraft()
+	self:_buildPad()
+	self:_rebuildCraft()
 
-	self:_render(Flight:GetState(), { throttle = 0, powered = false })
-
+	self._vehicle.Changed:Connect(function()
+		self:_rebuildCraft()
+	end)
 	Flight:GetUpdatedSignal():Connect(function(state, info)
 		self:_render(state, info)
 	end)
 end
 
 function CraftRenderer:_cleanupWorld()
-	-- The default Baseplate template ships an Atmosphere (that is the "fog") plus
-	-- a baseplate and spawn that sit right where our craft renders. Remove them
-	-- so the space scene is clean.
 	for _, inst in ipairs(Lighting:GetChildren()) do
 		if inst:IsA("Atmosphere") or inst:IsA("Sky") then
 			inst:Destroy()
@@ -80,8 +89,6 @@ function CraftRenderer:_cleanupWorld()
 end
 
 function CraftRenderer:_setupLighting()
-	-- Daytime sun so the planet and rocket are clearly lit and shaded (reads as
-	-- 3D). Cosmetic, client-side.
 	Lighting.ClockTime = 14.5
 	Lighting.GeographicLatitude = 20
 	Lighting.Brightness = 2.5
@@ -94,28 +101,11 @@ function CraftRenderer:_setupLighting()
 	Lighting.FogEnd = 1e9
 end
 
-local function makePart(parent, name, props)
-	local p = Instance.new("Part")
-	p.Name = name
-	p.Anchored = true
-	p.CanCollide = false
-	p.CanQuery = false
-	p.CanTouch = false
-	p.CastShadow = false
-	for k, v in pairs(props) do
-		p[k] = v
-	end
-	p.Parent = parent
-	return p
-end
-
 function CraftRenderer:_buildBody()
 	local body = Config.BODY
 	local model = Instance.new("Model")
 	model.Name = "Body_" .. body.name
 
-	-- Ocean sphere (a unit Part stretched by a SpecialMesh, since Parts cap at
-	-- 2048 studs).
 	local ocean = makePart(model, "Ocean", {
 		Size = Vector3.new(1, 1, 1),
 		Color = body.oceanColor,
@@ -128,8 +118,6 @@ function CraftRenderer:_buildBody()
 	mesh.Parent = ocean
 	model.PrimaryPart = ocean
 
-	-- Continent / ice slabs sitting tangent to the surface (a thin face pokes out
-	-- so they read as land from orbit).
 	local rng = Random.new(body.continentSeed)
 	local slabThickness = body.radius * 0.05
 	local function slab(dir, size, color, material)
@@ -138,11 +126,9 @@ function CraftRenderer:_buildBody()
 			Size = Vector3.new(size, size, slabThickness),
 			Color = color,
 			Material = material,
-			-- thin Z axis points outward along the surface normal
 			CFrame = CFrame.lookAt(dir * body.radius, dir * (body.radius * 2)),
 		})
 	end
-
 	for _ = 1, body.continents do
 		local dir = Vector3.new(rng:NextNumber(-1, 1), rng:NextNumber(-1, 1), rng:NextNumber(-1, 1))
 		if dir.Magnitude < 1e-3 then
@@ -150,14 +136,12 @@ function CraftRenderer:_buildBody()
 		end
 		local tint = rng:NextInteger(-25, 25)
 		local c = body.landColor
-		local color = Color3.fromRGB(
+		slab(dir, rng:NextNumber(body.radius * 0.28, body.radius * 0.45), Color3.fromRGB(
 			math.clamp(c.R * 255 + tint, 0, 255),
 			math.clamp(c.G * 255 + tint, 0, 255),
 			math.clamp(c.B * 255 + tint * 0.5, 0, 255)
-		)
-		slab(dir, rng:NextNumber(body.radius * 0.28, body.radius * 0.45), color, Enum.Material.Grass)
+		), Enum.Material.Grass)
 	end
-	-- Ice caps.
 	slab(Vector3.yAxis, body.radius * 0.5, body.iceColor, Enum.Material.Glacier)
 	slab(-Vector3.yAxis, body.radius * 0.5, body.iceColor, Enum.Material.Glacier)
 
@@ -165,106 +149,123 @@ function CraftRenderer:_buildBody()
 	self._body = model
 end
 
-function CraftRenderer:_buildCraft()
-	-- Rocket authored along -Z (nose forward) with +Y as "up" (the side the
-	-- avatar rides). PivotTo orients it each frame.
+function CraftRenderer:_buildPad()
+	-- Launch pad sits on the surface at (radius,0,0); axis points along +X (the
+	-- surface normal there). Fixed in sim space; only its render position moves.
+	local pad = makePart(Workspace, "LaunchPad", {
+		Shape = Enum.PartType.Cylinder,
+		Size = Vector3.new(4, 44, 44),
+		Color = Color3.fromRGB(90, 92, 100),
+		Material = Enum.Material.Metal,
+	})
+	self._pad = pad
+	self._padSim = Orbit.vec(Config.BODY.radius, 0, 0)
+end
+
+function CraftRenderer:_rebuildCraft()
+	if self._craft then
+		self._craft:Destroy()
+	end
+	local parts = self._vehicle:GetActiveParts() -- bottom -> top
+
 	local model = Instance.new("Model")
 	model.Name = "Craft"
-
-	local body = makePart(model, "Body", {
-		Size = Vector3.new(8, 8, 22),
-		Color = Color3.fromRGB(232, 236, 244),
-		Material = Enum.Material.Metal,
+	-- Invisible, unrotated root at the base so PivotTo orientation stays clean.
+	local root = makePart(model, "Root", {
+		Size = Vector3.new(0.2, 0.2, 0.2),
+		Transparency = 1,
 		CFrame = CFrame.new(0, 0, 0),
 	})
-	model.PrimaryPart = body
+	model.PrimaryPart = root
 
-	makePart(model, "Nose", {
-		Shape = Enum.PartType.Ball,
-		Size = Vector3.new(8, 8, 9),
-		Color = Color3.fromRGB(214, 78, 78),
-		Material = Enum.Material.SmoothPlastic,
-		CFrame = CFrame.new(0, 0, -13),
-	})
-	makePart(model, "Stripe", {
-		Size = Vector3.new(8.2, 8.2, 3),
-		Color = Color3.fromRGB(196, 60, 60),
-		Material = Enum.Material.SmoothPlastic,
-		CFrame = CFrame.new(0, 0, -4),
-	})
-	makePart(model, "Window", {
-		Shape = Enum.PartType.Ball,
-		Size = Vector3.new(3.5, 3.5, 3.5),
-		Color = Color3.fromRGB(120, 200, 255),
-		Material = Enum.Material.Neon,
-		CFrame = CFrame.new(0, 3.4, -7),
-	})
-	makePart(model, "Engine", {
-		Size = Vector3.new(6, 6, 3),
-		Color = Color3.fromRGB(60, 62, 72),
-		Material = Enum.Material.Metal,
-		CFrame = CFrame.new(0, 0, 12.5),
-	})
+	local y = 0
+	local bottomRadius = 3
+	for index, def in ipairs(parts) do
+		if index == 1 then
+			bottomRadius = def.radius
+		end
+		local mat = (def.category == "engine") and Enum.Material.Metal or Enum.Material.SmoothPlastic
+		local center = y + def.height / 2
+		addCylinder(model, def.name, def.height, def.radius, def.color, mat, center)
 
-	-- Four fins around the tail.
-	for i = 0, 3 do
-		local a = math.rad(i * 90)
-		makePart(model, "Fin" .. i, {
-			Size = Vector3.new(1.4, 5, 6),
-			Color = Color3.fromRGB(196, 60, 60),
-			Material = Enum.Material.SmoothPlastic,
-			CFrame = CFrame.fromAxisAngle(Vector3.zAxis, a) * CFrame.new(0, 5, 9),
-		})
+		if def.shape == "pod" then
+			makePart(model, "Dome", {
+				Shape = Enum.PartType.Ball,
+				Size = Vector3.new(def.radius * 1.8, def.radius * 1.4, def.radius * 1.8),
+				Color = def.color,
+				Material = Enum.Material.SmoothPlastic,
+				CFrame = CFrame.new(0, y + def.height, 0),
+			})
+			makePart(model, "Window", {
+				Shape = Enum.PartType.Ball,
+				Size = Vector3.new(1.6, 1.6, 1.6),
+				Color = Color3.fromRGB(120, 200, 255),
+				Material = Enum.Material.Neon,
+				CFrame = CFrame.new(0, center, -def.radius * 0.9),
+			})
+		elseif def.shape == "engine" then
+			addCylinder(model, "Nozzle", def.height * 0.5, def.radius * 0.66, Color3.fromRGB(40, 42, 48), Enum.Material.Metal, y - def.height * 0.1)
+		end
+		y += def.height
 	end
 
-	-- Exhaust flame (hidden unless thrusting).
+	-- Exhaust flame below the base (hidden unless thrusting).
 	local flame = makePart(model, "Flame", {
 		Shape = Enum.PartType.Ball,
-		Size = Vector3.new(6, 6, 10),
+		Size = Vector3.new(bottomRadius * 1.5, 12, bottomRadius * 1.5),
 		Color = Color3.fromRGB(255, 150, 45),
 		Material = Enum.Material.Neon,
 		Transparency = 1,
-		CFrame = CFrame.new(0, 0, 17),
+		CFrame = CFrame.new(0, -6, 0),
 	})
-	local flameLight = Instance.new("PointLight")
-	flameLight.Color = Color3.fromRGB(255, 160, 70)
-	flameLight.Range = 40
-	flameLight.Brightness = 5
-	flameLight.Enabled = false
-	flameLight.Parent = flame
+	local light = Instance.new("PointLight")
+	light.Color = Color3.fromRGB(255, 160, 70)
+	light.Range = 36
+	light.Brightness = 5
+	light.Enabled = false
+	light.Parent = flame
 
 	model.Parent = Workspace
 	self._craft = model
 	self._flame = flame
-	self._flameLight = flameLight
+	self._flameLight = light
+end
+
+local function pointCFrame(posVec3, upVec3)
+	local up = (upVec3.Magnitude > 1e-3) and upVec3.Unit or Vector3.yAxis
+	local ref = (math.abs(up.Y) < 0.99) and Vector3.yAxis or Vector3.xAxis
+	local fwd = up:Cross(ref)
+	if fwd.Magnitude < 1e-3 then
+		fwd = up:Cross(Vector3.xAxis)
+	end
+	-- UpVector = up (rocket nose / +Y); LookVector = fwd (cosmetic for symmetry).
+	return CFrame.lookAt(posVec3, posVec3 + fwd.Unit, up)
 end
 
 function CraftRenderer:_render(state, info)
 	local origin = self._origin
 
-	-- Body sits at the sim origin.
 	self._body:PivotTo(CFrame.new(origin:ToRender(Orbit.vec(0, 0, 0))))
 
-	-- Rocket: nose along prograde, "up" radial-out.
-	local p = state.position
-	local up = Vector3.new(p.x, p.y, p.z)
-	up = (up.Magnitude > 1e-3) and up.Unit or Vector3.yAxis
-	local v = state.velocity
-	local forward = safeForward(up, Vector3.new(v.x, v.y, v.z))
+	if self._pad then
+		-- Pad axis (+X local) aligned to the launch-site normal (+X).
+		self._pad:PivotTo(CFrame.new(origin:ToRender(self._padSim)))
+	end
 
-	local craftRender = origin:ToRender(state.position)
-	-- LookVector(-Z) = forward (prograde); UpVector(+Y) = up (radial-out).
-	self._craft:PivotTo(CFrame.lookAt(craftRender, craftRender + forward, up))
+	if self._craft then
+		local pd = info and info.pointDir or Orbit.vec(0, 1, 0)
+		local up = Vector3.new(pd.x, pd.y, pd.z)
+		self._craft:PivotTo(pointCFrame(origin:ToRender(state.position), up))
 
-	-- Flame.
-	local throttle = (info and info.throttle) or 0
-	if info and info.powered and throttle > 0 then
-		self._flame.Transparency = 0.2
-		self._flame.Size = Vector3.new(6, 6, 8 + 22 * throttle)
-		self._flameLight.Enabled = true
-	else
-		self._flame.Transparency = 1
-		self._flameLight.Enabled = false
+		local throttle = (info and info.throttle) or 0
+		if info and info.powered and throttle > 0 then
+			self._flame.Transparency = 0.2
+			self._flame.Size = Vector3.new(self._flame.Size.X, 8 + 26 * throttle, self._flame.Size.Z)
+			self._flameLight.Enabled = true
+		else
+			self._flame.Transparency = 1
+			self._flameLight.Enabled = false
+		end
 	end
 end
 

@@ -26,6 +26,7 @@ end
 
 function CrewController:Start()
 	self._origin = Registry:Get("FloatingOriginController")
+	self._vehicle = Registry:Get("VehicleController")
 	local Flight = Registry:Get("FlightController")
 	local player = Players.LocalPlayer
 
@@ -55,8 +56,8 @@ function CrewController:Start()
 		self._rider = model
 	end)
 
-	Flight:GetUpdatedSignal():Connect(function(state)
-		self:_ride(state)
+	Flight:GetUpdatedSignal():Connect(function(state, info)
+		self:_ride(state, info)
 	end)
 end
 
@@ -113,27 +114,26 @@ function CrewController:_buildAstronaut()
 	return model
 end
 
-function CrewController:_ride(state)
+function CrewController:_ride(state, info)
 	local model = self._rider
 	if not model or not model.PrimaryPart then
 		return
 	end
 
-	local p = state.position
-	local up = Vector3.new(p.x, p.y, p.z)
+	-- Align "up" with the rocket's pointing direction so the rider rides with it.
+	local pd = info and info.pointDir
+	local up = pd and Vector3.new(pd.x, pd.y, pd.z) or Vector3.new(state.position.x, state.position.y, state.position.z)
 	up = (up.Magnitude > 1e-3) and up.Unit or Vector3.yAxis
 
-	local v = state.velocity
-	local look = Vector3.new(v.x, v.y, v.z)
-	if look.Magnitude < 1e-3 or math.abs(look.Unit:Dot(up)) > 0.99 then
-		look = up:Cross(Vector3.xAxis)
-		if look.Magnitude < 1e-3 then
-			look = up:Cross(Vector3.zAxis)
-		end
+	local look = up:Cross(Vector3.xAxis)
+	if look.Magnitude < 1e-3 then
+		look = up:Cross(Vector3.zAxis)
 	end
 	look = look.Unit
 
-	local standPos = self._origin:ToRender(state.position) + up * self._riderHeight
+	-- Sit near the top of the rocket (by the command pod).
+	local height = self._vehicle and self._vehicle:GetHeight() or self._riderHeight
+	local standPos = self._origin:ToRender(state.position) + up * (height * 0.82 + 2)
 	model:PivotTo(CFrame.lookAt(standPos, standPos + look, up))
 end
 

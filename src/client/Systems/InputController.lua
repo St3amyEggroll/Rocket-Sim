@@ -21,6 +21,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 
 local Config = require(Shared:WaitForChild("Config"))
+local Signal = require(Shared:WaitForChild("Signal"))
 
 local InputController = {}
 
@@ -37,6 +38,9 @@ function InputController:Init()
 		distance = Config.CAMERA.distanceDefault,
 		mapZoom = 1,
 	}
+	-- Discrete action events (created in Init so others can connect in Start).
+	self.StagePressed = Signal.new()
+	self.ToggleModePressed = Signal.new()
 end
 
 function InputController:Start()
@@ -71,6 +75,10 @@ function InputController:Start()
 				self._warpIndex = math.max(1, self._warpIndex - 1)
 			elseif k == Enum.KeyCode.M then
 				self._mapMode = not self._mapMode
+			elseif k == Enum.KeyCode.Space then
+				self.StagePressed:Fire()
+			elseif k == Enum.KeyCode.B then
+				self.ToggleModePressed:Fire()
 			end
 		elseif input.UserInputType == Enum.UserInputType.MouseButton2 then
 			self._rmbDown = true
@@ -150,6 +158,14 @@ end
 -- Live camera orbit table { azimuth, elevation, distance, mapZoom }.
 function InputController:GetCameraOrbit()
 	return self._cam
+end
+
+function InputController:GetStageSignal()
+	return self.StagePressed
+end
+
+function InputController:GetToggleModeSignal()
+	return self.ToggleModePressed
 end
 
 return InputController

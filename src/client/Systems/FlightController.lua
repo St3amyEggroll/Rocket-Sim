@@ -1,13 +1,14 @@
 --[[
 	FlightController
-	Owner of: the craft's sim State (double-precision position/velocity), the
-	active body mu, and the flight status. Drives the master per-frame loop.
+	Owner of: the craft's sim State, the active body mu, and flight status. Drives
+	the master per-frame loop and respects the game mode.
 
-	Each frame:
-	  * throttle > 0  -> POWERED: Orbit.integrate (gravity + thrust), real dt.
-	  * throttle == 0 -> COASTING: Orbit.propagate with dt scaled by time warp.
-	Then it maintains the floating origin and fires "Updated" so the renderer,
-	rider, map view, camera and HUD can all react.
+	VAB mode    -> the craft sits on the launch pad (no sim); still broadcasts so
+	               the rocket renders on the planet.
+	Flight mode -> on entering, the craft is placed in a low orbit with full fuel.
+	               throttle > 0 burns the active stage (Orbit.integrate, real dt,
+	               thrust accel = stage thrust / current mass; fuel is consumed and
+	               Space stages). throttle == 0 coasts (Orbit.propagate, warped).
 ]]
 
 local RunService = game:GetService("RunService")
@@ -37,34 +38,57 @@ function FlightController:Init()
 	local body = Config.BODY
 	self._mu = body.mu
 	self._bodyRadius = body.radius
+	self._orbitAlt = Config.LAUNCH.orbitAltitude
 
-	local r = body.radius + Config.START.altitude
-	local speed = Orbit.circularSpeed(r, body.mu)
-
-	-- Clean low circular orbit in the XZ plane: position +X, velocity +Z.
-	self._state = {
-		position = Orbit.vec(r, 0, 0),
-		velocity = Orbit.vec(0, 0, speed),
-	}
-
-	self._status = "Coasting"
+	-- Start on the pad (VAB).
+	self._state = { position = Orbit.vec(body.radius, 0, 0), velocity = Orbit.vec(0, 0, 0) }
+	self._status = "VAB"
 	self._powered = false
-	self._landed = false
+	self._landed = true
 	self._updateCount = 0
 
-	-- Per-frame broadcast (created in Init so listeners can connect in Start).
 	self.Updated = Signal.new()
 end
 
 function FlightController:Start()
 	self._input = Registry:Get("InputController")
 	self._origin = Registry:Get("FloatingOriginController")
+	self._mode = Registry:Get("GameModeController")
+	self._vehicle = Registry:Get("VehicleController")
 
-	-- Run just after the engine's internal camera step so our Scriptable camera
-	-- CFrame (set inside the Updated broadcast) wins the frame.
+	self._mode.ModeChanged:Connect(function(m)
+		self:_onMode(m)
+	end)
+	self._input:GetStageSignal():Connect(function()
+		if self._mode:GetMode() == "Flight" then
+			self._vehicle:Stage()
+		end
+	end)
+
+	self:_onMode(self._mode:GetMode())
+
 	RunService:BindToRenderStep("RocketSim_Flight", Enum.RenderPriority.Camera.Value + 1, function(dt)
 		self:_step(dt)
 	end)
+end
+
+function FlightController:_onMode(mode)
+	if mode == "Flight" then
+		self._vehicle:ResetRuntime()
+		local r = self._bodyRadius + self._orbitAlt
+		self._state = {
+			position = Orbit.vec(r, 0, 0),
+			velocity = Orbit.vec(0, 0, Orbit.circularSpeed(r, self._mu)),
+		}
+		self._landed = false
+		self._status = "Coasting"
+	else
+		self._vehicle:ResetRuntime() -- rebuild the full rocket for the pad preview
+		self._state = { position = Orbit.vec(self._bodyRadius, 0, 0), velocity = Orbit.vec(0, 0, 0) }
+		self._landed = true
+		self._status = "VAB"
+	end
+	self._origin:SetOrigin(self._state.position)
 end
 
 function FlightController:_thrustDirection(mode, pos, vel)
@@ -77,47 +101,64 @@ function FlightController:_thrustDirection(mode, pos, vel)
 		local d = unit(pos)
 		return d and negate(d) or nil
 	end
-	-- Prograde (default); falls back to "up" when nearly stationary.
 	return unit(vel) or unit(pos)
 end
 
 function FlightController:_step(rawDt)
-	local dt = math.clamp(rawDt, 0, Config.FLIGHT.maxDt)
-	local mu = self._mu
-	local R = self._bodyRadius
+	local mode = self._mode:GetMode()
+	local pos = self._state.position
 
+	if mode ~= "Flight" then
+		-- VAB: hold on the pad, rocket points "up" (radial out).
+		self._status = "VAB"
+		self._powered = false
+		self._updateCount += 1
+		self._origin:UpdateFor(self._state.position)
+		self.Updated:Fire(self._state, {
+			mode = mode,
+			pointDir = unit(pos) or Orbit.vec(1, 0, 0),
+			throttle = 0,
+			powered = false,
+			status = "VAB",
+			warp = 1,
+			mapMode = self._input:GetMapMode(),
+			mu = self._mu,
+			bodyRadius = self._bodyRadius,
+		})
+		return
+	end
+
+	local dt = math.clamp(rawDt, 0, Config.FLIGHT.maxDt)
 	local throttle = self._input:GetThrottle()
-	local mode = self._input:GetThrustMode()
+	local tmode = self._input:GetThrustMode()
 	local warp = self._input:GetTimeWarp()
 	local powered = false
+	local thrustDir = nil
 
 	if self._landed and throttle <= 0 then
-		-- Resting on the surface, engine off: hold position.
 		self._status = "Landed"
 	else
-		if throttle > 0 then
-			-- POWERED: thrust acceleration handed to the integrator (gravity is
-			-- added inside Orbit.integrate). Real dt only - never warp a burn.
-			local mag = Config.CRAFT.thrustAccel * throttle
-			local extraAccel = function(pos, vel)
-				local dir = self:_thrustDirection(mode, pos, vel)
-				if not dir then
+		local accelMag = self._vehicle:GetThrustAccel(throttle)
+		if throttle > 0 and accelMag > 0 then
+			thrustDir = self:_thrustDirection(tmode, pos, self._state.velocity)
+			local extraAccel = function(p2, v2)
+				local d = self:_thrustDirection(tmode, p2, v2)
+				if not d then
 					return Orbit.vec(0, 0, 0)
 				end
-				return Orbit.vec(dir.x * mag, dir.y * mag, dir.z * mag)
+				return Orbit.vec(d.x * accelMag, d.y * accelMag, d.z * accelMag)
 			end
-			self._state = Orbit.integrate(self._state, mu, dt, extraAccel)
+			self._state = Orbit.integrate(self._state, self._mu, dt, extraAccel)
+			self._vehicle:ConsumeFuel(dt, throttle)
 			powered = true
 		else
-			-- COASTING: analytic propagation, dt scaled by time warp.
-			self._state = Orbit.propagate(self._state, mu, dt * warp)
+			self._state = Orbit.propagate(self._state, self._mu, dt * warp)
 		end
 
-		-- Surface contact: clamp to the surface and treat as landed.
 		local p = self._state.position
 		local nr = math.sqrt(p.x * p.x + p.y * p.y + p.z * p.z)
-		if nr < R then
-			local s = R / nr
+		if nr < self._bodyRadius then
+			local s = self._bodyRadius / nr
 			self._state.position = Orbit.vec(p.x * s, p.y * s, p.z * s)
 			self._state.velocity = Orbit.vec(0, 0, 0)
 			self._landed = true
@@ -130,18 +171,33 @@ function FlightController:_step(rawDt)
 
 	self._powered = powered
 	self._updateCount += 1
+
+	-- Pointing direction for the renderer.
+	local p2 = self._state.position
+	local v2 = self._state.velocity
+	local pd
+	if powered and thrustDir then
+		pd = thrustDir
+	else
+		local sp = math.sqrt(v2.x * v2.x + v2.y * v2.y + v2.z * v2.z)
+		pd = (sp > 1e-3) and unit(v2) or (unit(p2) or Orbit.vec(1, 0, 0))
+	end
+
 	self._origin:UpdateFor(self._state.position)
 
 	self.Updated:Fire(self._state, {
+		mode = mode,
+		pointDir = pd,
 		dt = dt,
 		throttle = throttle,
-		thrustMode = mode,
+		thrustMode = tmode,
 		warp = warp,
 		mapMode = self._input:GetMapMode(),
 		powered = powered,
 		status = self._status,
-		mu = mu,
-		bodyRadius = R,
+		mu = self._mu,
+		bodyRadius = self._bodyRadius,
+		tele = self._vehicle:GetTelemetry(throttle),
 	})
 end
 

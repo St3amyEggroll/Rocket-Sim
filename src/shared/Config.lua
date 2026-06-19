@@ -29,6 +29,12 @@ Config.START = {
 	altitude = 4000, -- studs above surface -> orbital radius = radius + altitude
 }
 
+-- Phase 3: build in the VAB, then Launch into this orbit with the built rocket.
+Config.LAUNCH = {
+	orbitAltitude = 4000, -- altitude the craft launches into
+	defaultDesign = { "EngineMain", "TankL", "TankL", "Pod" }, -- bottom -> top
+}
+
 -- The test craft (a small rocket; infinite fuel until Phase 3).
 Config.CRAFT = {
 	radius = 14, -- bounding radius used for camera framing / map marker
