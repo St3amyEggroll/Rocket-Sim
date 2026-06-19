@@ -67,7 +67,8 @@ function CameraController:_update(state)
 	local p = state.position
 
 	if self._input:GetMapMode() then
-		-- Map: frame the body; pull back to fit the orbit.
+		-- Map: the world is compressed into a fixed radius around the body, so a
+		-- fixed, render-safe camera distance always frames it.
 		local target = self._origin:ToRender(Orbit.vec(0, 0, 0))
 		local cosE = math.cos(orbit.elevation)
 		local dir = Vector3.new(
@@ -75,11 +76,7 @@ function CameraController:_update(state)
 			math.sin(orbit.elevation),
 			math.sin(orbit.azimuth) * cosE
 		)
-		local readout = Orbit.getReadout(state, self._mu)
-		local rNow = math.sqrt(p.x * p.x + p.y * p.y + p.z * p.z)
-		local apoR = (readout.apoapsis < math.huge) and (readout.apoapsis + self._bodyRadius) or rNow
-		local frameR = math.max(apoR, rNow, self._bodyRadius * 1.5)
-		local distance = frameR * Config.CAMERA.mapFrameMultiplier * orbit.mapZoom
+		local distance = Config.RENDER.mapViewRadius * Config.RENDER.mapCamMultiplier * orbit.mapZoom
 		cam.CFrame = CFrame.lookAt(target + dir * distance, target)
 		return
 	end

@@ -121,6 +121,12 @@ function CrewController:_ride(state, info)
 		return
 	end
 
+	-- Parked out of sight in map view (the craft marker represents it there).
+	if info and info.mapMode then
+		model:PivotTo(CFrame.new(0, Config.RENDER.parkY, 0))
+		return
+	end
+
 	-- Align "up" with the rocket's pointing direction so the rider rides with it.
 	local pd = info and info.pointDir
 	local up = pd and Vector3.new(pd.x, pd.y, pd.z) or Vector3.new(state.position.x, state.position.y, state.position.z)

@@ -1,13 +1,12 @@
 --[[
 	MapViewController
 	Owner of: the orbit trajectory line, the apo/peri markers, and the craft
-	marker (so you can see where the rocket is when zoomed out).
+	marker.
 
-	The orbit shape is fixed while coasting, so the (expensive) Orbit.sampleOrbitPath
-	is only recomputed when the trajectory actually changes (a burn), when the map
-	is shown, and occasionally as a safety. Every frame it just re-projects the
-	cached sim points through the floating origin - cheap - so time warp stays
-	smooth.
+	Draws in the SAME compressed map space as CraftRenderer (everything scaled by
+	info.mapScale around the body so it always fits inside render range). The orbit
+	sim path is cached and only recomputed on a burn / when shown / periodically,
+	so warp stays smooth; each frame it just re-projects cached points.
 
 	Visible only in map view (toggle M).
 ]]
@@ -34,7 +33,6 @@ function MapViewController:Init()
 	self._simPath = nil
 	self._maxI = 1
 	self._minI = 1
-	self._thickness = Config.ORBITLINE.thicknessMin
 	self._closed = true
 end
 
@@ -112,12 +110,8 @@ function MapViewController:_setVisible(visible)
 end
 
 function MapViewController:_recompute(state)
-	local cfg = Config.ORBITLINE
-	local pts = Orbit.sampleOrbitPath(state, self._mu, cfg.segments)
+	local pts = Orbit.sampleOrbitPath(state, self._mu, Config.ORBITLINE.segments)
 	local readout = Orbit.getReadout(state, self._mu)
-
-	local apoR = (readout.apoapsis < math.huge) and readout.apoapsis or mag(state.position)
-	self._thickness = math.clamp(apoR * cfg.thicknessScale, cfg.thicknessMin, cfg.thicknessMax)
 	self._closed = readout.apoapsis < math.huge
 
 	local maxD, minD, maxI, minI = -1, math.huge, 1, 1
@@ -136,7 +130,7 @@ function MapViewController:_recompute(state)
 end
 
 function MapViewController:_update(state, info)
-	if not self._input:GetMapMode() then
+	if not (info and info.mapMode) then
 		if self._visible then
 			self:_setVisible(false)
 		end
@@ -155,15 +149,22 @@ function MapViewController:_update(state, info)
 		self._needRecompute = false
 	end
 
-	local origin = self._origin
+	-- Compressed map projection: focus = body centre; scale = info.mapScale.
+	local focus = self._origin:ToRender(Orbit.vec(0, 0, 0))
+	local s = info.mapScale or 1
+	local function project(sp)
+		return focus + Vector3.new(sp.x, sp.y, sp.z) * s
+	end
+
+	local thickness = Config.RENDER.mapViewRadius * 0.025
+
 	local pts = self._simPath
 	local n = #pts
 	local render = table.create(n)
 	for i = 1, n do
-		render[i] = origin:ToRender(pts[i])
+		render[i] = project(pts[i])
 	end
 
-	local thickness = self._thickness
 	local segs = self._segments
 	for i = 1, #segs do
 		local a = render[i]
@@ -186,7 +187,7 @@ function MapViewController:_update(state, info)
 	local mk = thickness * 3
 	self._craftMarker.Transparency = 0
 	self._craftMarker.Size = Vector3.new(mk, mk, mk)
-	self._craftMarker.CFrame = CFrame.new(origin:ToRender(state.position))
+	self._craftMarker.CFrame = CFrame.new(project(state.position))
 
 	if self._closed then
 		self._apoMarker.Transparency = 0

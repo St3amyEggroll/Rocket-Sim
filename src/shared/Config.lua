@@ -49,6 +49,19 @@ Config.FLIGHT = {
 	maxDt = 0.1,
 }
 
+-- Rendering / level-of-detail so bodies never cull out of view.
+Config.RENDER = {
+	-- Chase view: the body is never drawn farther than this from the camera; past
+	-- it the body is pulled in and shrunk (angular size preserved) and its surface
+	-- detail (continents) is dropped. Keep it inside any reasonable render range.
+	bodyFlightCap = 4500,
+	-- Map view: the whole orbit is drawn within this radius of the body, so it
+	-- always fits in render range regardless of the true orbit size.
+	mapViewRadius = 3000,
+	mapCamMultiplier = 2.4, -- map camera distance = mapViewRadius * this * mapZoom
+	parkY = 50000, -- where hidden models are parked
+}
+
 Config.FLOATING_ORIGIN = {
 	-- Large: in this compact world coordinates stay small, so we avoid per-frame
 	-- rebasing (which caused jitter). Rebasing still kicks in for very far orbits.

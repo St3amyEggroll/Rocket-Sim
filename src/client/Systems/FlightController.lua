@@ -34,6 +34,20 @@ local function negate(v)
 	return Orbit.vec(-v.x, -v.y, -v.z)
 end
 
+-- Map-view compression factor: scale the orbit down to a fixed render radius so
+-- it (and the body) always stay inside render range. 1 in chase view.
+function FlightController:_mapScale()
+	if not self._input:GetMapMode() then
+		return 1
+	end
+	local p = self._state.position
+	local rNow = math.sqrt(p.x * p.x + p.y * p.y + p.z * p.z)
+	local ro = Orbit.getReadout(self._state, self._mu)
+	local apoR = (ro.apoapsis < math.huge) and ro.apoapsis or rNow
+	local frameR = math.max(apoR, rNow, self._bodyRadius * 1.5)
+	return Config.RENDER.mapViewRadius / frameR
+end
+
 function FlightController:Init()
 	local body = Config.BODY
 	self._mu = body.mu
@@ -138,6 +152,7 @@ function FlightController:_step(rawDt)
 			status = "VAB",
 			warp = 1,
 			mapMode = self._input:GetMapMode(),
+			mapScale = self:_mapScale(),
 			mu = self._mu,
 			bodyRadius = self._bodyRadius,
 		})
@@ -209,6 +224,7 @@ function FlightController:_step(rawDt)
 		thrustMode = tmode,
 		warp = warp,
 		mapMode = self._input:GetMapMode(),
+		mapScale = self:_mapScale(),
 		powered = powered,
 		status = self._status,
 		mu = self._mu,
