@@ -73,9 +73,9 @@ Config.RENDER = {
 	proxyRadius = 1000, -- fixed render radius of the planet proxy ball (<=1024)
 	proxyDistMin = 1000,
 	proxyDistMax = 6000, -- keep the proxy comfortably inside render range
-	mapPlanetRadius = 900,
+	mapPlanetRadius = 800, -- fixed to-scale map body size (real Ball, <=1024)
 	mapViewRadius = 3000,
-	mapCamMultiplier = 2.0,
+	mapCamMultiplier = 2.2,
 	parkY = 400000,
 }
 

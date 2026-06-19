@@ -140,16 +140,18 @@ function FlightController:_updateAttitude(dt, pos, vel)
 	return sas
 end
 
-function FlightController:_mapScale()
-	if not self._input:GetMapMode() then
-		return 1
-	end
+-- Map is drawn TO SCALE: the body radius maps to a fixed render size, so the
+-- surface circle is exactly where it really is relative to the orbit (an orbit
+-- that clears the drawn planet clears the real surface). Returns scale + the
+-- render extent the map camera should frame.
+function FlightController:_mapInfo()
+	local scale = Config.RENDER.mapPlanetRadius / self._bodyRadius
 	local p = self._state.position
 	local rNow = math.sqrt(p.x * p.x + p.y * p.y + p.z * p.z)
 	local ro = Orbit.getReadout(self._state, self._mu)
 	local apoR = (ro.apoapsis < math.huge) and ro.apoapsis or rNow
-	local frameR = math.max(apoR, rNow, self._bodyRadius * 1.2)
-	return Config.RENDER.mapViewRadius / frameR
+	local frameRender = math.max(apoR, rNow, self._bodyRadius) * scale
+	return scale, frameRender
 end
 
 function FlightController:_fire(extra)
@@ -157,7 +159,9 @@ function FlightController:_fire(extra)
 	extra.nose = self._attitude.LookVector
 	extra.attitude = self._attitude
 	extra.mapMode = self._input:GetMapMode()
-	extra.mapScale = self:_mapScale()
+	local mapScale, mapFrame = self:_mapInfo()
+	extra.mapScale = mapScale
+	extra.mapFrameRadius = mapFrame
 	extra.mu = self._mu
 	extra.bodyRadius = self._bodyRadius
 	self.Updated:Fire(self._state, extra)

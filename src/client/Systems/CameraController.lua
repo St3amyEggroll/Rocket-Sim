@@ -67,7 +67,9 @@ function CameraController:_update(state, info)
 			math.sin(orbit.elevation),
 			math.sin(orbit.azimuth) * cosE
 		)
-		local distance = Config.RENDER.mapViewRadius * Config.RENDER.mapCamMultiplier * orbit.mapZoom
+		local frameR = (info and info.mapFrameRadius) or Config.RENDER.mapPlanetRadius * 2
+		frameR = math.max(frameR, Config.RENDER.mapPlanetRadius * 1.4)
+		local distance = frameR * Config.RENDER.mapCamMultiplier * orbit.mapZoom
 		cam.CFrame = CFrame.lookAt(target + dir * distance, target)
 		return
 	end

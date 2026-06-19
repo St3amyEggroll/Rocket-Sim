@@ -85,4 +85,4 @@ for _, name in ipairs(startOrder) do
 	end
 end
 
-print("[RocketSim] Client systems started -- build P3.6 (gravity-aligned camera).")
+print("[RocketSim] Client systems started -- build P3.7 (accurate to-scale map).")

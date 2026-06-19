@@ -167,7 +167,7 @@ function CraftRenderer:_buildMapPlanet()
 	self._mapPlanet = makePart(Workspace, "MapPlanet", {
 		Shape = Enum.PartType.Ball,
 		Size = Vector3.new(r * 2, r * 2, r * 2),
-		Color = Config.BODY.oceanColor,
+		Color = Config.BODY.landColor,
 		Material = Enum.Material.SmoothPlastic,
 		CFrame = CFrame.new(PARK),
 	})
