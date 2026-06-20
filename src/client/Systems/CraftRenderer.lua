@@ -38,7 +38,7 @@ local function makeBody(parent, name, props)
 	p.CanCollide = true
 	p.CanQuery = false
 	p.CastShadow = false
-	p.CustomPhysicalProperties = physProps(1) -- density set later by mass
+	p.CustomPhysicalProperties = physProps(Config.PHYSICS.craftDensity)
 	for k, v in pairs(props) do
 		p[k] = v
 	end
@@ -141,6 +141,7 @@ function CraftRenderer:_buildLegs(model, bottomRadius)
 			Size = Vector3.new(L.thickness, len, L.thickness),
 			Color = L.color,
 			Material = Enum.Material.Metal,
+			CanCollide = false, -- thin struts: cosmetic; the feet do the contact
 			CFrame = CFrame.lookAt(mid, foot) * CFrame.Angles(math.rad(90), 0, 0),
 		})
 		makeBody(model, "Foot" .. i, {
@@ -222,16 +223,12 @@ function CraftRenderer:_rebuildCraft()
 	light.Parent = flame
 
 	-- Weld every part rigidly to the root.
-	local massfulParts = {}
 	for _, p in ipairs(model:GetChildren()) do
 		if p:IsA("BasePart") and p ~= root then
 			local weld = Instance.new("WeldConstraint")
 			weld.Part0 = root
 			weld.Part1 = p
 			weld.Parent = root
-		end
-		if p:IsA("BasePart") and not p.Massless then
-			massfulParts[#massfulParts + 1] = p
 		end
 	end
 
@@ -263,24 +260,15 @@ function CraftRenderer:_rebuildCraft()
 	align.RigidityEnabled = false
 	align.ReactionTorqueEnabled = false
 	align.Responsiveness = Config.PHYSICS.controlResponsiveness
-	align.MaxTorque = Config.PHYSICS.controlMaxTorque
+	align.MaxTorque = 0 -- FlightController sets this each frame (scaled by real mass)
 	align.Enabled = false -- FlightController enables it only while flying (off when landed)
 	align.Parent = root
 
 	model.Parent = Workspace
 
-	-- Total volume (each part's mass at density 1) so FlightController can set the
-	-- assembly mass to the design mass via a shared density.
-	local totalVolume = 0
-	for _, p in ipairs(massfulParts) do
-		totalVolume += p.Mass
-	end
-
 	self._craft = {
 		model = model,
 		root = root,
-		parts = massfulParts,
-		totalVolume = (totalVolume > 0) and totalVolume or 1,
 		gravForce = gravForce,
 		thrustForce = thrustForce,
 		align = align,

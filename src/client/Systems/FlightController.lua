@@ -31,10 +31,6 @@ local Planet = require(Shared:WaitForChild("Planet"))
 
 local FlightController = {}
 
-local function physProps(density)
-	return PhysicalProperties.new(density, Config.PHYSICS.partFriction, Config.PHYSICS.partElasticity, 1, 1)
-end
-
 local function unit(v)
 	local m = math.sqrt(v.x * v.x + v.y * v.y + v.z * v.z)
 	if m < 1e-9 then
@@ -120,7 +116,6 @@ end
 function FlightController:_onMode(mode)
 	self._vehicle:ResetRuntime() -- fires Changed -> craft rebuilt + handles refreshed
 	self._handles = self._crafter:GetCraft()
-	self._lastDensity = nil
 	self._attitude = CFrame.lookAt(Vector3.zero, Vector3.yAxis, Vector3.xAxis)
 	self._onRails = false
 	self._peakDescent = 0
@@ -148,7 +143,6 @@ end
 -- Craft was rebuilt (staging / VAB edit): keep flying continuously.
 function FlightController:_onCraftChanged()
 	self._handles = self._crafter:GetCraft()
-	self._lastDensity = nil
 	local h = self._handles
 	if not h or not h.root then
 		return
@@ -250,24 +244,6 @@ function FlightController:_alignCFrame(handles)
 	return CFrame.fromMatrix(Vector3.zero, right, nose)
 end
 
--- ------------------------------------------------------------------- masses ----
-
-function FlightController:_applyMass(handles)
-	local mass = self._vehicle:GetCurrentMass()
-	if mass <= 0 then
-		return
-	end
-	local density = mass / handles.totalVolume
-	if self._lastDensity and math.abs(density - self._lastDensity) <= self._lastDensity * 0.01 then
-		return
-	end
-	local props = physProps(density)
-	for _, p in ipairs(handles.parts) do
-		p.CustomPhysicalProperties = props
-	end
-	self._lastDensity = density
-end
-
 -- --------------------------------------------------------------------- loop ----
 
 function FlightController:_readState(handles)
@@ -280,7 +256,6 @@ end
 function FlightController:_physicsStep(handles, dt, throttle)
 	local root = handles.root
 	root.Anchored = false
-	self:_applyMass(handles)
 	self:_readState(handles)
 
 	local pos = self._state.position
@@ -291,22 +266,29 @@ function FlightController:_physicsStep(handles, dt, throttle)
 	local sas = self:_updateAttitude(dt, pos, vel)
 	self._sas = sas
 
-	-- Radial gravity at the centre of mass.
-	local mass = self._vehicle:GetCurrentMass()
-	local g = self._mu / (r * r)
-	handles.gravForce.Force = Vector3.new(-radialUp.x, -radialUp.y, -radialUp.z) * (mass * g)
+	-- Forces are scaled by the body's REAL (stable) mass so the part density can be
+	-- normal, while the DESIGN mass only sets the target accelerations (KSP feel).
+	local realMass = root.AssemblyMass
+	local designMass = self._vehicle:GetCurrentMass()
 
-	-- Thrust along the nose.
+	-- Radial gravity: accelerate at g regardless of the real mass.
+	local g = self._mu / (r * r)
+	handles.gravForce.Force = Vector3.new(-radialUp.x, -radialUp.y, -radialUp.z) * (realMass * g)
+
+	-- Thrust along the nose: target accel = thrust / designMass.
 	local powered = false
 	local thrust = self._vehicle:GetCurrentThrust(throttle)
-	if throttle > 0 and thrust > 0 then
-		handles.thrustForce.Force = Vector3.new(0, thrust, 0)
+	if throttle > 0 and thrust > 0 and designMass > 0 then
+		local accel = thrust / designMass
+		handles.thrustForce.Force = Vector3.new(0, realMass * accel, 0)
 		self._vehicle:ConsumeFuel(dt, throttle)
 		powered = true
 	else
 		handles.thrustForce.Force = Vector3.zero
 	end
 
+	-- Steering authority scales with the real mass so it can actually turn it.
+	handles.align.MaxTorque = realMass * Config.PHYSICS.controlTorquePerMass
 	handles.align.CFrame = self:_alignCFrame(handles)
 
 	-- Landing / crash classification.
