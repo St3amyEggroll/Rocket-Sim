@@ -199,7 +199,7 @@ function FlightController:_sasTarget(sas, pos, vel)
 end
 
 -- Update the attitude TARGET (LookVector = desired nose). The AlignOrientation
--- on the body chases this; manual input switches SAS to Manual.
+-- on the body rigidly tracks this; manual input switches SAS to Manual.
 function FlightController:_updateAttitude(dt, pos, vel)
 	local pitch, yaw, roll = self._input:GetAttitudeInput()
 	local sas = self._input:GetSAS()
@@ -209,20 +209,28 @@ function FlightController:_updateAttitude(dt, pos, vel)
 		self._attitude = self._attitude
 			* CFrame.Angles(pitch * C.pitchRate * dt, yaw * C.yawRate * dt, roll * C.rollRate * dt)
 	else
+		-- Rotate the nose TOWARD the SAS target (pitch/yaw only), preserving roll.
+		-- Building a fresh look-CFrame instead would reset roll from an arbitrary
+		-- "up" reference (which flips when the nose is near vertical) and make the
+		-- whole craft roll -- that was the bug.
 		local target = self:_sasTarget(sas, pos, vel)
 		if target and target.Magnitude > 1e-3 then
 			target = target.Unit
-			local up = Vector3.new(pos.x, pos.y, pos.z)
-			up = (up.Magnitude > 1e-3) and up.Unit or Vector3.yAxis
-			if math.abs(target:Dot(up)) > 0.99 then
-				up = target:Cross(Vector3.xAxis)
-				if up.Magnitude < 1e-3 then
-					up = target:Cross(Vector3.zAxis)
+			local curLook = self._attitude.LookVector
+			local dot = math.clamp(curLook:Dot(target), -1, 1)
+			local angle = math.acos(dot)
+			if angle > 1e-4 then
+				local axis = curLook:Cross(target)
+				if axis.Magnitude < 1e-5 then -- ~180 deg: any perpendicular axis works
+					axis = curLook:Cross(Vector3.xAxis)
+					if axis.Magnitude < 1e-5 then
+						axis = curLook:Cross(Vector3.zAxis)
+					end
 				end
-				up = up.Unit
+				axis = axis.Unit
+				local step = math.min(angle, C.sasSlew * dt) -- slew-limited
+				self._attitude = CFrame.fromAxisAngle(axis, step) * self._attitude
 			end
-			local targetCF = CFrame.lookAt(Vector3.zero, target, up)
-			self._attitude = self._attitude:Lerp(targetCF, math.clamp(C.sasSlew * dt, 0, 1))
 		end
 	end
 	return sas

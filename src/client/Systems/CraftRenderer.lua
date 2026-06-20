@@ -107,6 +107,24 @@ function CraftRenderer:_setupLighting()
 	Lighting.EnvironmentDiffuseScale = 0.5
 	Lighting.EnvironmentSpecularScale = 0.4
 	Lighting.FogEnd = 1e9
+
+	-- A black starfield sky (no atmosphere): the body is in space. rbxassetid://0
+	-- gives black skybox faces; stars + the sun are still drawn.
+	for _, inst in ipairs(Lighting:GetChildren()) do
+		if inst:IsA("Sky") then
+			inst:Destroy()
+		end
+	end
+	local sky = Instance.new("Sky")
+	sky.StarCount = 7000
+	sky.CelestialBodiesShown = true
+	sky.SkyboxBk = "rbxassetid://0"
+	sky.SkyboxDn = "rbxassetid://0"
+	sky.SkyboxFt = "rbxassetid://0"
+	sky.SkyboxLf = "rbxassetid://0"
+	sky.SkyboxRt = "rbxassetid://0"
+	sky.SkyboxUp = "rbxassetid://0"
+	sky.Parent = Lighting
 end
 
 function CraftRenderer:_buildPad()
