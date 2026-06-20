@@ -45,6 +45,8 @@ function FlightController:Init()
 	self._powered = false
 	self._landed = true
 	self._crashed = false
+	self._tipping = false
+	self._tipProgress = 0
 	self._updateCount = 0
 	self.Updated = Signal.new()
 end
@@ -73,10 +75,14 @@ end
 
 function FlightController:_onMode(mode)
 	self._vehicle:ResetRuntime()
-	self._state = { position = Orbit.vec(0, self._launchRadius, 0), velocity = Orbit.vec(0, 0, 0) }
+	-- Stand on the legs at launch (the base rests standHeight above the pad).
+	local stand = self._vehicle:HasLegs() and Config.LEGS.standHeight or 0
+	self._state = { position = Orbit.vec(0, self._launchRadius + stand, 0), velocity = Orbit.vec(0, 0, 0) }
 	self._attitude = CFrame.lookAt(Vector3.zero, Vector3.yAxis, Vector3.xAxis)
 	self._landed = true
 	self._crashed = false
+	self._tipping = false
+	self._tipProgress = 0
 	self._status = (mode == "Flight") and "Landed" or "VAB"
 	self._origin:SetOrigin(Orbit.vec(0, 0, 0))
 end
@@ -186,6 +192,21 @@ function FlightController:_step(rawDt)
 	end
 
 	local dt = math.clamp(rawDt, 0, Config.FLIGHT.maxDt)
+
+	-- Tipping over after a bad landing (scripted): rotate the craft onto its side.
+	if self._tipping then
+		self:_advanceTip(dt)
+		self._origin:UpdateFor(self._state.position)
+		self:_fire({ pointDir = self._attitude.LookVector, throttle = 0, powered = false, status = "Crashed", warp = 1, sas = "--" })
+		return
+	end
+	-- Crashed wreck: hold it until the player rebuilds / relaunches (B).
+	if self._crashed then
+		self._origin:UpdateFor(self._state.position)
+		self:_fire({ pointDir = self._attitude.LookVector, throttle = 0, powered = false, status = "Crashed", warp = 1, sas = "--" })
+		return
+	end
+
 	local throttle = self._input:GetThrottle()
 	local warp = self._input:GetTimeWarp()
 
@@ -194,7 +215,7 @@ function FlightController:_step(rawDt)
 	local powered = false
 
 	if self._landed and throttle <= 0 then
-		self._status = self._crashed and "Crashed" or "Landed"
+		self._status = "Landed"
 	else
 		local accelMag = self._vehicle:GetThrustAccel(throttle)
 		if throttle > 0 and accelMag > 0 then
@@ -208,22 +229,8 @@ function FlightController:_step(rawDt)
 			self._state = Orbit.propagate(self._state, self._mu, dt * warp)
 		end
 
-		local p = self._state.position
-		local nr = math.sqrt(p.x * p.x + p.y * p.y + p.z * p.z)
-		local surf = Planet.radiusForSim(p) -- terrain height beneath the craft
-		if nr < surf then
-			-- Touchdown: classify soft landing vs crash by impact speed.
-			local impact = math.sqrt(
-				self._state.velocity.x ^ 2 + self._state.velocity.y ^ 2 + self._state.velocity.z ^ 2
-			)
-			local s = surf / nr
-			self._state.position = Orbit.vec(p.x * s, p.y * s, p.z * s)
-			self._state.velocity = Orbit.vec(0, 0, 0)
-			self._landed = true
-			self._crashed = impact > Config.FLIGHT.landSpeed
-			self._status = self._crashed and "Crashed" or "Landed"
-		else
-			self._landed = false
+		self:_checkTouchdown(nose) -- sets _landed / _crashed / _tipping + status
+		if not self._landed then
 			self._status = powered and "Powered" or "Coasting"
 		end
 	end
@@ -240,6 +247,102 @@ function FlightController:_step(rawDt)
 		status = self._status,
 		tele = self._vehicle:GetTelemetry(throttle),
 	})
+end
+
+-- Terrain slope (radians) under a sim position, from the heightfield gradient.
+function FlightController:_terrainSlope(upv)
+	local R = self._bodyRadius
+	local ref = (math.abs(upv.Y) < 0.99) and Vector3.yAxis or Vector3.xAxis
+	local t1 = upv:Cross(ref).Unit
+	local t2 = upv:Cross(t1).Unit
+	local eps = 12
+	local function hAt(offset)
+		local d = (upv * R + offset).Unit
+		return Planet.radiusForUnit(d.X, d.Y, d.Z)
+	end
+	local dh1 = hAt(t1 * eps) - hAt(-t1 * eps)
+	local dh2 = hAt(t2 * eps) - hAt(-t2 * eps)
+	local grad = math.sqrt(dh1 * dh1 + dh2 * dh2) / (2 * eps)
+	return math.atan(grad)
+end
+
+-- If the craft has reached the surface, rest it and decide clean land vs tip/crash.
+function FlightController:_checkTouchdown(nose)
+	local p = self._state.position
+	local nr = math.sqrt(p.x * p.x + p.y * p.y + p.z * p.z)
+	local surf = Planet.radiusForSim(p)
+	local hasLegs = self._vehicle:HasLegs()
+	local restR = surf + (hasLegs and Config.LEGS.standHeight or 0)
+
+	if nr >= restR then
+		self._landed = false
+		return
+	end
+
+	local upd = unit(p) or Orbit.vec(0, 1, 0)
+	local upv = Vector3.new(upd.x, upd.y, upd.z)
+	local vel = self._state.velocity
+	local velv = Vector3.new(vel.x, vel.y, vel.z)
+	local impact = velv.Magnitude
+	local horiz = velv - upv * velv:Dot(upv)
+	local horizSpeed = horiz.Magnitude
+	local nosev = Vector3.new(nose.X, nose.Y, nose.Z)
+	local noseTilt = math.acos(math.clamp(nosev:Dot(upv), -1, 1))
+	local slope = self:_terrainSlope(upv)
+
+	-- Rest the craft on the surface (feet on the ground).
+	local s = restR / nr
+	self._state.position = Orbit.vec(p.x * s, p.y * s, p.z * s)
+	self._state.velocity = Orbit.vec(0, 0, 0)
+	self._landed = true
+
+	local L = Config.LANDING
+	local tiltLim = hasLegs and L.maxTiltLegs or L.maxTiltBare
+	local horizLim = hasLegs and L.maxHorizLegs or L.maxHorizBare
+	local slopeLim = hasLegs and L.maxSlopeLegs or L.maxSlopeBare
+
+	local unstable = (noseTilt > tiltLim) or (horizSpeed > horizLim) or (slope > slopeLim)
+	local tooHard = impact > Config.FLIGHT.landSpeed
+
+	if unstable then
+		self._crashed = true
+		self:_beginTip(upv, horiz, nosev)
+		self._status = "Crashed"
+	elseif tooHard then
+		self._crashed = true
+		self._status = "Crashed"
+	else
+		self._crashed = false
+		self._status = "Landed"
+	end
+end
+
+function FlightController:_beginTip(upv, horiz, nosev)
+	self._tipping = true
+	self._tipProgress = 0
+	local tipDir = horiz
+	if tipDir.Magnitude < 0.1 then
+		tipDir = nosev - upv * nosev:Dot(upv) -- the way the nose already leans
+	end
+	if tipDir.Magnitude < 0.1 then
+		tipDir = upv:Cross(Vector3.xAxis)
+		if tipDir.Magnitude < 0.1 then
+			tipDir = upv:Cross(Vector3.zAxis)
+		end
+	end
+	tipDir = tipDir.Unit
+	local axis = upv:Cross(tipDir)
+	self._tipAxis = (axis.Magnitude > 1e-3) and axis.Unit or Vector3.xAxis
+	self._tipStartAttitude = self._attitude
+end
+
+function FlightController:_advanceTip(dt)
+	self._tipProgress = math.min(1, self._tipProgress + dt / Config.LANDING.tipDuration)
+	local angle = self._tipProgress * math.rad(95) -- fall just past horizontal
+	self._attitude = CFrame.fromAxisAngle(self._tipAxis, angle) * self._tipStartAttitude
+	if self._tipProgress >= 1 then
+		self._tipping = false -- stays crashed (held by the crashed branch)
+	end
 end
 
 function FlightController:GetState()

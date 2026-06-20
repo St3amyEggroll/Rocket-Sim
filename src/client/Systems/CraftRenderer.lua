@@ -112,6 +112,34 @@ function CraftRenderer:_buildPad()
 	})
 end
 
+function CraftRenderer:_buildLegs(model, bottomRadius)
+	local L = require(Shared:WaitForChild("Config")).LEGS
+	local footY = -L.standHeight
+	local footR = bottomRadius * L.spread
+	for i = 1, L.count do
+		local ang = (i - 1) * (2 * math.pi / L.count)
+		local dir = Vector3.new(math.cos(ang), 0, math.sin(ang))
+		local top = Vector3.new(0, bottomRadius * 0.35, 0)
+		local foot = Vector3.new(dir.X * footR, footY, dir.Z * footR)
+		local mid = (top + foot) * 0.5
+		local len = (foot - top).Magnitude
+		makePart(model, "Leg" .. i, {
+			Shape = Enum.PartType.Block,
+			Size = Vector3.new(L.thickness, len, L.thickness),
+			Color = L.color,
+			Material = Enum.Material.Metal,
+			CFrame = CFrame.lookAt(mid, foot) * CFrame.Angles(math.rad(90), 0, 0),
+		})
+		makePart(model, "Foot" .. i, {
+			Shape = Enum.PartType.Ball,
+			Size = Vector3.new(L.footRadius * 2, L.footRadius * 2, L.footRadius * 2),
+			Color = L.color,
+			Material = Enum.Material.Metal,
+			CFrame = CFrame.new(foot),
+		})
+	end
+end
+
 function CraftRenderer:_rebuildCraft()
 	if self._craft then
 		self._craft:Destroy()
@@ -125,25 +153,36 @@ function CraftRenderer:_rebuildCraft()
 
 	local y = 0
 	local bottomRadius = 3
-	for index, def in ipairs(parts) do
-		if index == 1 then
-			bottomRadius = def.radius
+	local bottomSet = false
+	local hasLegs = false
+	for _, def in ipairs(parts) do
+		if def.shape == "legs" then
+			hasLegs = true
+		else
+			if not bottomSet then
+				bottomRadius = def.radius
+				bottomSet = true
+			end
+			local mat = (def.category == "engine") and Enum.Material.Metal or Enum.Material.SmoothPlastic
+			local center = y + def.height / 2
+			addCylinder(model, def.name, def.height, def.radius, def.color, mat, center)
+			if def.shape == "pod" then
+				makePart(model, "Dome", {
+					Shape = Enum.PartType.Ball,
+					Size = Vector3.new(def.radius * 1.8, def.radius * 1.4, def.radius * 1.8),
+					Color = def.color,
+					Material = Enum.Material.SmoothPlastic,
+					CFrame = CFrame.new(0, y + def.height, 0),
+				})
+			elseif def.shape == "engine" then
+				addCylinder(model, "Nozzle", def.height * 0.5, def.radius * 0.66, Color3.fromRGB(40, 42, 48), Enum.Material.Metal, y - def.height * 0.1)
+			end
+			y += def.height
 		end
-		local mat = (def.category == "engine") and Enum.Material.Metal or Enum.Material.SmoothPlastic
-		local center = y + def.height / 2
-		addCylinder(model, def.name, def.height, def.radius, def.color, mat, center)
-		if def.shape == "pod" then
-			makePart(model, "Dome", {
-				Shape = Enum.PartType.Ball,
-				Size = Vector3.new(def.radius * 1.8, def.radius * 1.4, def.radius * 1.8),
-				Color = def.color,
-				Material = Enum.Material.SmoothPlastic,
-				CFrame = CFrame.new(0, y + def.height, 0),
-			})
-		elseif def.shape == "engine" then
-			addCylinder(model, "Nozzle", def.height * 0.5, def.radius * 0.66, Color3.fromRGB(40, 42, 48), Enum.Material.Metal, y - def.height * 0.1)
-		end
-		y += def.height
+	end
+
+	if hasLegs then
+		self:_buildLegs(model, bottomRadius)
 	end
 
 	local flame = makePart(model, "Flame", {
