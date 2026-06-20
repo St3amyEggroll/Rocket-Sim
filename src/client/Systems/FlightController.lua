@@ -6,8 +6,8 @@
 
 	  * gravity  -> a radial VectorForce (Workspace.Gravity is 0),
 	  * thrust   -> a VectorForce along the nose while throttled (fuel burns),
-	  * steering -> an AlignOrientation chasing the attitude target (WASD/QE) or a
-	                SAS hold (1-5),
+	  * steering -> the orientation is set kinematically to the attitude target each
+	                frame (WASD/QE) or a SAS hold (1-5),
 	and reads the body's transform/velocity back each frame for everyone else.
 
 	The craft collides, tips and rests on the terrain for real, so landing is
@@ -198,8 +198,8 @@ function FlightController:_sasTarget(sas, pos, vel)
 	return nil
 end
 
--- Update the attitude TARGET (LookVector = desired nose). The AlignOrientation
--- on the body rigidly tracks this; manual input switches SAS to Manual.
+-- Update the attitude TARGET (LookVector = desired nose). The body's orientation
+-- is set to this each frame (kinematic); manual input switches SAS to Manual.
 function FlightController:_updateAttitude(dt, pos, vel)
 	local pitch, yaw, roll = self._input:GetAttitudeInput()
 	local sas = self._input:GetSAS()
@@ -234,15 +234,6 @@ function FlightController:_updateAttitude(dt, pos, vel)
 		end
 	end
 	return sas
-end
-
--- AlignOrientation CFrame whose UpVector is the target nose (root +Y aligns to it).
--- Using the attitude's OWN right axis (a stable reference) means the control damps
--- roll/spin, instead of free-spinning about the nose. It is only ever enabled well
--- clear of the ground and the target is synced to the craft while disabled, so it
--- never snaps when it engages.
-function FlightController:_alignCFrame()
-	return CFrame.fromMatrix(Vector3.zero, self._attitude.RightVector, self._attitude.LookVector)
 end
 
 -- --------------------------------------------------------------------- loop ----
@@ -290,10 +281,13 @@ function FlightController:_physicsStep(handles, dt, throttle)
 		handles.thrustForce.Force = Vector3.zero
 	end
 
-	-- Attitude control is ALWAYS active and rigid: a rocket has no passive stability,
-	-- so it must be held every moment (gating it off near the ground let it tumble).
-	-- It rigidly holds the target orientation, so it cannot oscillate or spin.
-	handles.align.CFrame = self:_alignCFrame()
+	-- Attitude is controlled KINEMATICALLY: the orientation is set directly to the
+	-- target each frame and spin is zeroed. Position stays fully physics-driven
+	-- (gravity, thrust, collisions), so the craft falls / flies / lands for real but
+	-- can never tumble, roll, shake, or pump energy off the ground. (AlignOrientation
+	-- fought the ground contact and flung the craft -- this removes that entirely.)
+	root.CFrame = CFrame.fromMatrix(root.Position, self._attitude.RightVector, self._attitude.LookVector)
+	root.AssemblyAngularVelocity = Vector3.zero
 
 	-- Landing / crash classification (status only; physics is the same throughout).
 	local wantLanded = (throttle <= 0 and atGround and speed < Config.PHYSICS.restSpeed)

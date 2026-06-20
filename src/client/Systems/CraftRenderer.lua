@@ -8,9 +8,8 @@
 	loop drives:
 	  * GravityForce  - a VectorForce applied at the centre of mass (radial gravity),
 	  * ThrustForce   - a VectorForce along the nose, applied at the centre of mass,
-	  * Align         - an AlignOrientation (the reaction-wheel attitude control).
-	FlightController sets their values every frame and reads the body back; this
-	module only builds the hardware and renders the engine flame.
+	FlightController sets the forces every frame, sets the orientation kinematically,
+	and reads the body back; this module only builds the hardware and the flame.
 
 	Custom gravity means Workspace.Gravity is 0; every part's mass is set from the
 	design via density so thrust/gravity produce the tuned accelerations.
@@ -271,16 +270,9 @@ function CraftRenderer:_rebuildCraft()
 	thrustForce.Force = Vector3.zero
 	thrustForce.Parent = root
 
-	local align = Instance.new("AlignOrientation")
-	align.Name = "AttitudeAlign"
-	align.Mode = Enum.OrientationAlignmentMode.OneAttachment
-	align.Attachment0 = att
-	-- Rigid attitude hold: the orientation rigidly tracks the target, so the craft
-	-- can never oscillate (shake) or spin. FlightController sets the target CFrame.
-	align.RigidityEnabled = true
-	align.ReactionTorqueEnabled = false
-	align.Enabled = true
-	align.Parent = root
+	-- Orientation is set kinematically by FlightController (no AlignOrientation):
+	-- physics handles translation, the flight loop handles rotation. This avoids the
+	-- rigid-constraint-vs-collision energy pumping that was flinging the craft.
 
 	model.Parent = Workspace
 
@@ -289,7 +281,6 @@ function CraftRenderer:_rebuildCraft()
 		root = root,
 		gravForce = gravForce,
 		thrustForce = thrustForce,
-		align = align,
 		flame = flame,
 		flameLight = light,
 		bottomRadius = bottomRadius,
