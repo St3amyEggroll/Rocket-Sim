@@ -42,13 +42,37 @@ Config.FLIGHT = {
 	landSpeed = 32, -- touchdown faster than this (studs/s) counts as a crash
 }
 
+-- Real rigid-body flight. The craft is a welded, collidable Roblox assembly with
+-- custom radial gravity; thrust and steering are applied as forces/torques and it
+-- collides, tips and rests on the terrain for real. Time warp falls back to
+-- analytic propagation (you cannot warp a physics sim) -- see FlightController.
+Config.PHYSICS = {
+	controlResponsiveness = 35, -- AlignOrientation responsiveness (reaction-wheel feel)
+	controlMaxTorque = 4e6, -- AlignOrientation max torque
+	restSpeed = 2.5, -- below this assembly speed near ground = at rest
+	groundContactAlt = 50, -- radar altitude under which "at the surface" applies
+	minWarpAlt = 150, -- time warp (on-rails) only honoured above this altitude
+	partFriction = 0.7, -- so landed craft does not slide
+	partElasticity = 0, -- no bounce
+	spawnClearance = 1.5, -- studs the craft hovers above the pad at spawn (settles down)
+}
+
+Config.LEGS = {
+	count = 3, -- legs evenly around the base
+	drop = 5.5, -- how far the feet reach below the engine
+	spread = 2.4, -- foot distance from the axis = bottomRadius * spread
+	thickness = 0.8,
+	footRadius = 1.4,
+	color = Color3.fromRGB(70, 74, 84),
+}
+
 Config.CRAFT = {
 	radius = 14,
 	riderHeight = 7,
 }
 
 Config.LAUNCH = {
-	defaultDesign = { "EngineMain", "TankL", "TankL", "Pod" }, -- bottom -> top
+	defaultDesign = { "EngineMain", "LandingLegs", "TankL", "TankL", "Pod" }, -- bottom -> top
 	turnStartAlt = 150,
 	turnEndAlt = 1200,
 }

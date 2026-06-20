@@ -1,12 +1,22 @@
 --[[
 	FlightController
-	Owner of: the craft's sim State, its attitude (orientation), the active body,
-	and flight status. Drives the master per-frame loop.
+	Owner of: the master flight loop, the attitude TARGET, the active body and
+	flight status. The craft itself is a real Roblox rigid body built by
+	CraftRenderer; this module drives it:
 
-	Attitude is manual (WASD/QE) or auto-oriented (SAS: 1-5). Thrust always fires
-	along the nose (attitude.LookVector). VAB mode holds the craft on the pad;
-	Flight mode lets it fly. Engine off coasts (propagate, warp-scaled); thrust on
-	integrates (real dt) using the built rocket's thrust/mass, burning fuel.
+	  * gravity  -> a radial VectorForce (Workspace.Gravity is 0),
+	  * thrust   -> a VectorForce along the nose while throttled (fuel burns),
+	  * steering -> an AlignOrientation chasing the attitude target (WASD/QE) or a
+	                SAS hold (1-5),
+	and reads the body's transform/velocity back each frame for everyone else.
+
+	The craft collides, tips and rests on the terrain for real, so landing is
+	physical: touch down slow, upright, on its legs. Hard touchdowns just flag a red
+	"Crashed" status (you can relaunch).
+
+	Time warp cannot run a physics sim, so warp switches to analytic Kepler
+	propagation ("on rails"): the body is anchored and moved kinematically, then
+	handed back to physics (with its velocity restored) when warp ends.
 ]]
 
 local RunService = game:GetService("RunService")
@@ -21,6 +31,10 @@ local Planet = require(Shared:WaitForChild("Planet"))
 
 local FlightController = {}
 
+local function physProps(density)
+	return PhysicalProperties.new(density, Config.PHYSICS.partFriction, Config.PHYSICS.partElasticity, 1, 1)
+end
+
 local function unit(v)
 	local m = math.sqrt(v.x * v.x + v.y * v.y + v.z * v.z)
 	if m < 1e-9 then
@@ -29,22 +43,29 @@ local function unit(v)
 	return Orbit.vec(v.x / m, v.y / m, v.z / m)
 end
 
+local function v3(d)
+	return d and Vector3.new(d.x, d.y, d.z) or nil
+end
+
 function FlightController:Init()
 	local body = Config.BODY
 	self._mu = body.mu
 	self._bodyRadius = body.radius
 	self._turnStart = Config.LAUNCH.turnStartAlt
 	self._turnEnd = Config.LAUNCH.turnEndAlt
-	-- Launch site at the +Y pole, sitting on the terrain height there.
 	self._launchRadius = Planet.radiusForSim(Orbit.vec(0, body.radius, 0))
 
-	-- Nose points radial-out (+Y).
 	self._state = { position = Orbit.vec(0, self._launchRadius, 0), velocity = Orbit.vec(0, 0, 0) }
-	self._attitude = CFrame.lookAt(Vector3.zero, Vector3.yAxis, Vector3.xAxis)
+	self._attitude = CFrame.lookAt(Vector3.zero, Vector3.yAxis, Vector3.xAxis) -- LookVector = target nose
 	self._status = "VAB"
 	self._powered = false
 	self._landed = true
 	self._crashed = false
+	self._onRails = false
+	self._peakDescent = 0
+	self._throttle = 0
+	self._warp = 1
+	self._sas = "Ascent"
 	self._updateCount = 0
 	self.Updated = Signal.new()
 end
@@ -54,6 +75,8 @@ function FlightController:Start()
 	self._origin = Registry:Get("FloatingOriginController")
 	self._mode = Registry:Get("GameModeController")
 	self._vehicle = Registry:Get("VehicleController")
+	self._crafter = Registry:Get("CraftRenderer")
+	self._handles = self._crafter:GetCraft()
 
 	self._mode.ModeChanged:Connect(function(m)
 		self:_onMode(m)
@@ -63,6 +86,9 @@ function FlightController:Start()
 			self._vehicle:Stage()
 		end
 	end)
+	self._vehicle.Changed:Connect(function()
+		self:_onCraftChanged()
+	end)
 
 	self:_onMode(self._mode:GetMode())
 
@@ -71,15 +97,79 @@ function FlightController:Start()
 	end)
 end
 
-function FlightController:_onMode(mode)
-	self._vehicle:ResetRuntime()
-	self._state = { position = Orbit.vec(0, self._launchRadius, 0), velocity = Orbit.vec(0, 0, 0) }
-	self._attitude = CFrame.lookAt(Vector3.zero, Vector3.yAxis, Vector3.xAxis)
-	self._landed = true
-	self._crashed = false
-	self._status = (mode == "Flight") and "Landed" or "VAB"
-	self._origin:SetOrigin(Orbit.vec(0, 0, 0))
+-- ---------------------------------------------------------------- placement ----
+
+function FlightController:_spawnCFrame()
+	local r = self._launchRadius + Config.LEGS.drop + Config.PHYSICS.spawnClearance
+	return CFrame.fromMatrix(Vector3.new(0, r, 0), Vector3.xAxis, Vector3.yAxis) -- UpVector = +Y = nose
 end
+
+function FlightController:_holdOnPad(handles)
+	if not handles or not handles.root or not handles.root.Parent then
+		return
+	end
+	local sp = self:_spawnCFrame()
+	handles.root.Anchored = true
+	handles.model:PivotTo(sp)
+	handles.root.AssemblyLinearVelocity = Vector3.zero
+	handles.gravForce.Force = Vector3.zero
+	handles.thrustForce.Force = Vector3.zero
+	self._state = { position = Orbit.vec(0, sp.Position.Y, 0), velocity = Orbit.vec(0, 0, 0) }
+end
+
+function FlightController:_onMode(mode)
+	self._vehicle:ResetRuntime() -- fires Changed -> craft rebuilt + handles refreshed
+	self._handles = self._crafter:GetCraft()
+	self._lastDensity = nil
+	self._attitude = CFrame.lookAt(Vector3.zero, Vector3.yAxis, Vector3.xAxis)
+	self._onRails = false
+	self._peakDescent = 0
+	self._crashed = false
+	self._landed = true
+	self._origin:SetOrigin(Orbit.vec(0, 0, 0))
+
+	if mode == "Flight" then
+		local h = self._handles
+		local sp = self:_spawnCFrame()
+		if h and h.root then
+			h.root.Anchored = false
+			h.model:PivotTo(sp)
+			h.root.AssemblyLinearVelocity = Vector3.zero
+			h.root.AssemblyAngularVelocity = Vector3.zero
+		end
+		self._state = { position = Orbit.vec(0, sp.Position.Y, 0), velocity = Orbit.vec(0, 0, 0) }
+		self._status = "Landed"
+	else
+		self:_holdOnPad(self._handles)
+		self._status = "VAB"
+	end
+end
+
+-- Craft was rebuilt (staging / VAB edit): keep flying continuously.
+function FlightController:_onCraftChanged()
+	self._handles = self._crafter:GetCraft()
+	self._lastDensity = nil
+	local h = self._handles
+	if not h or not h.root then
+		return
+	end
+	if self._mode:GetMode() == "Flight" then
+		local p = self._state.position
+		local cf = CFrame.fromMatrix(Vector3.new(p.x, p.y, p.z), self._attitude.RightVector, self._attitude.LookVector)
+		h.model:PivotTo(cf)
+		if self._onRails then
+			h.root.Anchored = true
+		else
+			h.root.Anchored = false
+			h.root.AssemblyLinearVelocity = v3(self._state.velocity)
+			h.root.AssemblyAngularVelocity = Vector3.zero
+		end
+	else
+		self:_holdOnPad(h)
+	end
+end
+
+-- ----------------------------------------------------------------- attitude ----
 
 function FlightController:_ascentDirection(pos)
 	local rad = unit(pos)
@@ -95,10 +185,6 @@ function FlightController:_ascentDirection(pos)
 		rad.y * (1 - f) + tang.y * f,
 		rad.z * (1 - f) + tang.z * f
 	)) or rad
-end
-
-local function v3(d)
-	return d and Vector3.new(d.x, d.y, d.z) or nil
 end
 
 function FlightController:_sasTarget(sas, pos, vel)
@@ -118,8 +204,10 @@ function FlightController:_sasTarget(sas, pos, vel)
 	return nil
 end
 
+-- Update the attitude TARGET (LookVector = desired nose). The AlignOrientation
+-- on the body chases this; manual input switches SAS to Manual.
 function FlightController:_updateAttitude(dt, pos, vel)
-	local pitch, yaw, roll = self._input:GetAttitudeInput() -- may switch SAS to Manual
+	local pitch, yaw, roll = self._input:GetAttitudeInput()
 	local sas = self._input:GetSAS()
 	local C = Config.CONTROL
 
@@ -146,12 +234,184 @@ function FlightController:_updateAttitude(dt, pos, vel)
 	return sas
 end
 
--- Map is drawn TO SCALE: the body radius maps to a fixed render size, so the
--- surface circle is exactly where it really is relative to the orbit (an orbit
--- that clears the drawn planet clears the real surface). Returns scale + the
--- render extent the map camera should frame.
+-- AlignOrientation CFrame whose UpVector is the target nose (so root +Y aligns).
+function FlightController:_alignCFrame()
+	return CFrame.fromMatrix(Vector3.zero, self._attitude.RightVector, self._attitude.LookVector)
+end
+
+-- ------------------------------------------------------------------- masses ----
+
+function FlightController:_applyMass(handles)
+	local mass = self._vehicle:GetCurrentMass()
+	if mass <= 0 then
+		return
+	end
+	local density = mass / handles.totalVolume
+	if self._lastDensity and math.abs(density - self._lastDensity) <= self._lastDensity * 0.01 then
+		return
+	end
+	local props = physProps(density)
+	for _, p in ipairs(handles.parts) do
+		p.CustomPhysicalProperties = props
+	end
+	self._lastDensity = density
+end
+
+-- --------------------------------------------------------------------- loop ----
+
+function FlightController:_readState(handles)
+	local root = handles.root
+	local p = root.Position
+	local v = root.AssemblyLinearVelocity
+	self._state = { position = Orbit.vec(p.X, p.Y, p.Z), velocity = Orbit.vec(v.X, v.Y, v.Z) }
+end
+
+function FlightController:_physicsStep(handles, dt, throttle)
+	local root = handles.root
+	root.Anchored = false
+	self:_applyMass(handles)
+	self:_readState(handles)
+
+	local pos = self._state.position
+	local vel = self._state.velocity
+	local r = math.sqrt(pos.x * pos.x + pos.y * pos.y + pos.z * pos.z)
+	local radialUp = unit(pos) or Orbit.vec(0, 1, 0)
+
+	local sas = self:_updateAttitude(dt, pos, vel)
+	self._sas = sas
+
+	-- Radial gravity at the centre of mass.
+	local mass = self._vehicle:GetCurrentMass()
+	local g = self._mu / (r * r)
+	handles.gravForce.Force = Vector3.new(-radialUp.x, -radialUp.y, -radialUp.z) * (mass * g)
+
+	-- Thrust along the nose.
+	local powered = false
+	local thrust = self._vehicle:GetCurrentThrust(throttle)
+	if throttle > 0 and thrust > 0 then
+		handles.thrustForce.Force = Vector3.new(0, thrust, 0)
+		self._vehicle:ConsumeFuel(dt, throttle)
+		powered = true
+	else
+		handles.thrustForce.Force = Vector3.zero
+	end
+
+	handles.align.CFrame = self:_alignCFrame()
+
+	-- Landing / crash classification.
+	local surf = Planet.radiusForSim(pos)
+	local radarAlt = r - surf
+	local speed = math.sqrt(vel.x * vel.x + vel.y * vel.y + vel.z * vel.z)
+	local vertSpeed = vel.x * radialUp.x + vel.y * radialUp.y + vel.z * radialUp.z
+	local atGround = radarAlt < Config.PHYSICS.groundContactAlt
+
+	local wantLanded = (throttle <= 0 and atGround and speed < Config.PHYSICS.restSpeed)
+	if wantLanded and not self._landed then
+		self._landed = true
+		self._crashed = self._peakDescent > Config.FLIGHT.landSpeed
+	elseif self._landed and (speed > Config.PHYSICS.restSpeed * 2 or radarAlt > Config.PHYSICS.groundContactAlt * 1.5) then
+		self._landed = false
+		self._crashed = false
+		self._peakDescent = 0
+	end
+	if not self._landed then
+		self._peakDescent = math.max(self._peakDescent, -vertSpeed)
+	end
+
+	self._powered = powered
+	if self._landed then
+		self._status = self._crashed and "Crashed" or "Landed"
+	else
+		self._status = powered and "Powered" or "Coasting"
+	end
+
+	-- Attitude control acts like reaction wheels: it steers in flight but is
+	-- released once at rest, so a craft on a steep slope (or that came down
+	-- tilted / on no legs) tips over for real instead of being held upright.
+	handles.align.Enabled = not self._landed
+end
+
+function FlightController:_railsStep(handles, dt, warp)
+	local root = handles.root
+	if not self._onRails then
+		self._onRails = true
+		self:_readState(handles)
+		self._railState = {
+			position = Orbit.vec(self._state.position.x, self._state.position.y, self._state.position.z),
+			velocity = Orbit.vec(self._state.velocity.x, self._state.velocity.y, self._state.velocity.z),
+		}
+		root.Anchored = true
+		handles.gravForce.Force = Vector3.zero
+		handles.thrustForce.Force = Vector3.zero
+	end
+
+	self._sas = self:_updateAttitude(dt, self._railState.position, self._railState.velocity)
+	self._railState = Orbit.propagate(self._railState, self._mu, dt * warp)
+	self._state = self._railState
+
+	local p = self._railState.position
+	handles.model:PivotTo(CFrame.fromMatrix(Vector3.new(p.x, p.y, p.z), self._attitude.RightVector, self._attitude.LookVector))
+
+	self._powered = false
+	self._landed = false
+	self._status = "Coasting"
+end
+
+function FlightController:_exitRails(handles)
+	self._onRails = false
+	local root = handles.root
+	root.Anchored = false
+	root.AssemblyLinearVelocity = v3(self._railState.velocity)
+	root.AssemblyAngularVelocity = Vector3.zero
+end
+
+function FlightController:_step(rawDt)
+	self._updateCount += 1
+	local handles = self._handles
+	if not handles or not handles.root or not handles.root.Parent then
+		self._handles = self._crafter:GetCraft()
+		handles = self._handles
+		if not handles then
+			return
+		end
+	end
+
+	local mode = self._mode:GetMode()
+	if mode ~= "Flight" then
+		self._throttle = 0
+		self._warp = 1
+		self._powered = false
+		self._sas = "VAB"
+		self._status = "VAB"
+		self:_holdOnPad(handles)
+		self:_fire()
+		return
+	end
+
+	local dt = math.clamp(rawDt, 0, Config.FLIGHT.maxDt)
+	self._throttle = self._input:GetThrottle()
+	self._warp = self._input:GetTimeWarp()
+
+	-- On-rails warp is only honoured well clear of the ground, so you cannot warp
+	-- while landed or warp straight into the terrain.
+	local p = self._state.position
+	local alt = math.sqrt(p.x * p.x + p.y * p.y + p.z * p.z) - self._bodyRadius
+	if self._warp > 1 and alt > Config.PHYSICS.minWarpAlt then
+		self:_railsStep(handles, dt, self._warp)
+	else
+		if self._onRails then
+			self:_exitRails(handles)
+		end
+		self:_physicsStep(handles, dt, self._throttle)
+	end
+
+	self:_fire()
+end
+
+-- ------------------------------------------------------------------- output ----
+
+-- Map is drawn TO SCALE around the real planet (see MapViewController).
 function FlightController:_mapInfo()
-	-- Small world: map is drawn at TRUE scale around the real terrain planet.
 	local p = self._state.position
 	local rNow = math.sqrt(p.x * p.x + p.y * p.y + p.z * p.z)
 	local ro = Orbit.getReadout(self._state, self._mu)
@@ -160,87 +420,38 @@ function FlightController:_mapInfo()
 	return 1, frameRender
 end
 
-function FlightController:_fire(extra)
-	extra.mode = self._mode:GetMode()
-	extra.nose = self._attitude.LookVector
-	extra.attitude = self._attitude
-	extra.mapMode = self._input:GetMapMode()
-	local mapScale, mapFrame = self:_mapInfo()
-	extra.mapScale = mapScale
-	extra.mapFrameRadius = mapFrame
-	extra.mu = self._mu
-	extra.bodyRadius = self._bodyRadius
-	self.Updated:Fire(self._state, extra)
-end
-
-function FlightController:_step(rawDt)
-	local mode = self._mode:GetMode()
-	local pos = self._state.position
-	self._updateCount += 1
-
-	if mode ~= "Flight" then
-		self._status = "VAB"
-		self._origin:UpdateFor(pos)
-		self:_fire({ pointDir = self._attitude.LookVector, throttle = 0, powered = false, status = "VAB", warp = 1, sas = "VAB" })
-		return
-	end
-
-	local dt = math.clamp(rawDt, 0, Config.FLIGHT.maxDt)
-	local throttle = self._input:GetThrottle()
-	local warp = self._input:GetTimeWarp()
-
-	local sas = self:_updateAttitude(dt, pos, self._state.velocity)
-	local nose = self._attitude.LookVector
-	local powered = false
-
-	if self._landed and throttle <= 0 then
-		self._status = self._crashed and "Crashed" or "Landed"
+function FlightController:_fire()
+	local h = self._handles
+	local nose, rollRef
+	if h and h.root and h.root.Parent then
+		nose = h.root.CFrame.UpVector
+		rollRef = h.root.CFrame.LookVector
 	else
-		local accelMag = self._vehicle:GetThrustAccel(throttle)
-		if throttle > 0 and accelMag > 0 then
-			local a = Orbit.vec(nose.X * accelMag, nose.Y * accelMag, nose.Z * accelMag)
-			self._state = Orbit.integrate(self._state, self._mu, dt, function()
-				return a
-			end)
-			self._vehicle:ConsumeFuel(dt, throttle)
-			powered = true
-		else
-			self._state = Orbit.propagate(self._state, self._mu, dt * warp)
-		end
-
-		local p = self._state.position
-		local nr = math.sqrt(p.x * p.x + p.y * p.y + p.z * p.z)
-		local surf = Planet.radiusForSim(p) -- terrain height beneath the craft
-		if nr < surf then
-			-- Touchdown: classify soft landing vs crash by impact speed.
-			local impact = math.sqrt(
-				self._state.velocity.x ^ 2 + self._state.velocity.y ^ 2 + self._state.velocity.z ^ 2
-			)
-			local s = surf / nr
-			self._state.position = Orbit.vec(p.x * s, p.y * s, p.z * s)
-			self._state.velocity = Orbit.vec(0, 0, 0)
-			self._landed = true
-			self._crashed = impact > Config.FLIGHT.landSpeed
-			self._status = self._crashed and "Crashed" or "Landed"
-		else
-			self._landed = false
-			self._status = powered and "Powered" or "Coasting"
-		end
+		nose = self._attitude.LookVector
+		rollRef = self._attitude.UpVector
 	end
+	local attInfo = CFrame.lookAt(Vector3.zero, nose, rollRef)
+	local mapScale, mapFrame = self:_mapInfo()
 
-	self._powered = powered
-	self._origin:UpdateFor(self._state.position)
-	self:_fire({
+	self.Updated:Fire(self._state, {
+		mode = self._mode:GetMode(),
 		pointDir = nose,
-		dt = dt,
-		throttle = throttle,
-		warp = warp,
-		sas = sas,
-		powered = powered,
-		status = self._status,
-		tele = self._vehicle:GetTelemetry(throttle),
+		attitude = attInfo,
+		throttle = self._throttle or 0,
+		warp = self._warp or 1,
+		sas = self._sas or "Manual",
+		powered = self._powered or false,
+		status = self._status or "Coasting",
+		tele = self._vehicle:GetTelemetry(self._throttle or 0),
+		mapMode = self._input:GetMapMode(),
+		mapScale = mapScale,
+		mapFrameRadius = mapFrame,
+		mu = self._mu,
+		bodyRadius = self._bodyRadius,
 	})
 end
+
+-- ------------------------------------------------------------------ getters ----
 
 function FlightController:GetState()
 	return self._state

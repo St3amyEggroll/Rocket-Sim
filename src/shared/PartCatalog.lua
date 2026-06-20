@@ -78,10 +78,21 @@ PartCatalog.parts = {
 		shape = "engine",
 		drag = 0.3,
 	},
+	LandingLegs = {
+		id = "LandingLegs",
+		name = "Landing Legs",
+		category = "structure",
+		mass = 0.3,
+		height = 0, -- attaches around the base; does not extend the stack
+		radius = 3,
+		color = Color3.fromRGB(70, 74, 84),
+		shape = "legs",
+		drag = 0.1,
+	},
 }
 
 -- Display order in the VAB palette.
-PartCatalog.order = { "Pod", "TankS", "TankL", "EngineMain", "EngineVac" }
+PartCatalog.order = { "Pod", "TankS", "TankL", "EngineMain", "EngineVac", "LandingLegs" }
 
 function PartCatalog.get(id)
 	return PartCatalog.parts[id]
