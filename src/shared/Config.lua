@@ -35,6 +35,7 @@ Config.TERRAIN = {
 	streamOutAlt = 900, -- above this altitude all terrain unloads (Ball LOD only)
 	ballsPerYield = 40, -- fill-balls placed per frame while a chunk loads in
 	scanInterval = 0.15, -- seconds between render-distance rescans
+	padClearance = 80, -- keep terrain out from under the launch pad (+Y pole)
 }
 
 Config.FLIGHT = {
@@ -47,14 +48,15 @@ Config.FLIGHT = {
 -- collides, tips and rests on the terrain for real. Time warp falls back to
 -- analytic propagation (you cannot warp a physics sim) -- see FlightController.
 Config.PHYSICS = {
-	controlResponsiveness = 35, -- AlignOrientation responsiveness (reaction-wheel feel)
-	controlMaxTorque = 4e6, -- AlignOrientation max torque
+	controlResponsiveness = 20, -- AlignOrientation responsiveness (reaction-wheel feel)
+	controlMaxTorque = 2.5e4, -- AlignOrientation max torque (gentle: must not snap/spin)
 	restSpeed = 2.5, -- below this assembly speed near ground = at rest
+	liftoffSpeed = 8, -- must exceed this (or climb away) to count as airborne again
 	groundContactAlt = 50, -- radar altitude under which "at the surface" applies
 	minWarpAlt = 150, -- time warp (on-rails) only honoured above this altitude
 	partFriction = 0.7, -- so landed craft does not slide
 	partElasticity = 0, -- no bounce
-	spawnClearance = 1.5, -- studs the craft hovers above the pad at spawn (settles down)
+	spawnClearance = 0.5, -- studs the craft hovers above the pad at spawn (settles down)
 }
 
 Config.LEGS = {

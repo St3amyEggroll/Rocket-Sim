@@ -189,14 +189,18 @@ function TerrainController:_fillChunk(center, gen)
 	local t2 = d:Cross(t1).Unit
 
 	local half = CS * 0.8 -- sample a bit past the cube footprint so corners are covered
+	local padSq = Config.TERRAIN.padClearance * Config.TERRAIN.padClearance
 	local placed = 0
 	for u = -half, half, spacing do
 		for v = -half, half, spacing do
 			local sd = (d * R + t1 * u + t2 * v).Unit
 			local h = Planet.radiusForUnit(sd.X, sd.Y, sd.Z)
 			local p = sd * h -- the surface point
+			-- Keep terrain out from under the launch pad (the +Y pole) so the craft
+			-- never spawns inside terrain and gets ejected.
+			local underPad = p.Y > 0 and (p.X * p.X + p.Z * p.Z) < padSq
 			-- Only this chunk's own cells (the cube containing p).
-			if math.floor(p.X / CS) == ox and math.floor(p.Y / CS) == oy and math.floor(p.Z / CS) == oz then
+			if not underPad and math.floor(p.X / CS) == ox and math.floor(p.Y / CS) == oy and math.floor(p.Z / CS) == oz then
 				-- Centre the fill-ball one radius below the surface so its top sits at h
 				-- (matching where the craft lands) with the crust's thickness below it.
 				terrain:FillBall(sd * (h - ballR), ballR, GRASS)

@@ -264,6 +264,7 @@ function CraftRenderer:_rebuildCraft()
 	align.ReactionTorqueEnabled = false
 	align.Responsiveness = Config.PHYSICS.controlResponsiveness
 	align.MaxTorque = Config.PHYSICS.controlMaxTorque
+	align.Enabled = false -- FlightController enables it only while flying (off when landed)
 	align.Parent = root
 
 	model.Parent = Workspace

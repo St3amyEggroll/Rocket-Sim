@@ -234,9 +234,20 @@ function FlightController:_updateAttitude(dt, pos, vel)
 	return sas
 end
 
--- AlignOrientation CFrame whose UpVector is the target nose (so root +Y aligns).
-function FlightController:_alignCFrame()
-	return CFrame.fromMatrix(Vector3.zero, self._attitude.RightVector, self._attitude.LookVector)
+-- AlignOrientation CFrame whose UpVector is the TARGET nose (root +Y aligns to it).
+-- The roll axis is taken from the craft's CURRENT orientation, so the control only
+-- ever corrects pitch/yaw to point the nose and never fights/snaps roll (which was
+-- causing the craft to spin out on launch).
+function FlightController:_alignCFrame(handles)
+	local nose = self._attitude.LookVector
+	local cr = handles.root.CFrame.RightVector
+	local right = cr - nose * cr:Dot(nose) -- current right, projected off the nose
+	if right.Magnitude < 1e-3 then
+		cr = handles.root.CFrame.UpVector
+		right = cr - nose * cr:Dot(nose)
+	end
+	right = (right.Magnitude > 1e-3) and right.Unit or Vector3.xAxis
+	return CFrame.fromMatrix(Vector3.zero, right, nose)
 end
 
 -- ------------------------------------------------------------------- masses ----
@@ -296,7 +307,7 @@ function FlightController:_physicsStep(handles, dt, throttle)
 		handles.thrustForce.Force = Vector3.zero
 	end
 
-	handles.align.CFrame = self:_alignCFrame()
+	handles.align.CFrame = self:_alignCFrame(handles)
 
 	-- Landing / crash classification.
 	local surf = Planet.radiusForSim(pos)
@@ -309,7 +320,7 @@ function FlightController:_physicsStep(handles, dt, throttle)
 	if wantLanded and not self._landed then
 		self._landed = true
 		self._crashed = self._peakDescent > Config.FLIGHT.landSpeed
-	elseif self._landed and (speed > Config.PHYSICS.restSpeed * 2 or radarAlt > Config.PHYSICS.groundContactAlt * 1.5) then
+	elseif self._landed and (speed > Config.PHYSICS.liftoffSpeed or radarAlt > Config.PHYSICS.groundContactAlt * 1.5) then
 		self._landed = false
 		self._crashed = false
 		self._peakDescent = 0
