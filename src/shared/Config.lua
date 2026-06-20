@@ -35,39 +35,11 @@ Config.TERRAIN = {
 	streamOutAlt = 900, -- above this altitude all terrain unloads (Ball LOD only)
 	ballsPerYield = 40, -- fill-balls placed per frame while a chunk loads in
 	scanInterval = 0.15, -- seconds between render-distance rescans
-	padClearance = 80, -- keep terrain out from under the launch pad (+Y pole)
 }
 
 Config.FLIGHT = {
 	maxDt = 0.1,
 	landSpeed = 32, -- touchdown faster than this (studs/s) counts as a crash
-}
-
--- Real rigid-body flight. The craft is a welded, collidable Roblox assembly with
--- custom radial gravity; thrust and steering are applied as forces/torques and it
--- collides, tips and rests on the terrain for real. Time warp falls back to
--- analytic propagation (you cannot warp a physics sim) -- see FlightController.
-Config.PHYSICS = {
-	craftDensity = 0.7, -- a NORMAL density so the body is solid/stable (featherlight
-	-- parts get flung by the solver). The design mass only scales the forces below.
-	controlResponsiveness = 20, -- AlignOrientation responsiveness (reaction-wheel feel)
-	controlTorquePerMass = 150, -- AlignOrientation MaxTorque per unit of real mass
-	restSpeed = 2.5, -- below this assembly speed near ground = at rest
-	liftoffSpeed = 8, -- must exceed this (or climb away) to count as airborne again
-	groundContactAlt = 50, -- radar altitude under which "at the surface" applies
-	minWarpAlt = 150, -- time warp (on-rails) only honoured above this altitude
-	partFriction = 0.7, -- so landed craft does not slide
-	partElasticity = 0, -- no bounce
-	spawnClearance = 0.5, -- studs the craft's feet start above the pad (settles down)
-}
-
-Config.LEGS = {
-	count = 3, -- legs evenly around the base
-	drop = 5.5, -- how far the feet reach below the engine
-	spread = 2.4, -- foot distance from the axis = bottomRadius * spread
-	thickness = 0.8,
-	footRadius = 1.4,
-	color = Color3.fromRGB(70, 74, 84),
 }
 
 Config.CRAFT = {
@@ -76,7 +48,7 @@ Config.CRAFT = {
 }
 
 Config.LAUNCH = {
-	defaultDesign = { "EngineMain", "LandingLegs", "TankL", "TankL", "Pod" }, -- bottom -> top
+	defaultDesign = { "EngineMain", "TankL", "TankL", "Pod" }, -- bottom -> top
 	turnStartAlt = 150,
 	turnEndAlt = 1200,
 }

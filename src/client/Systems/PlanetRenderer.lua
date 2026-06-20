@@ -45,7 +45,7 @@ function PlanetRenderer:Start()
 	ball.Shape = Enum.PartType.Ball
 	ball.Size = Vector3.new(lod * 2, lod * 2, lod * 2)
 	ball.Anchored = true
-	ball.CanCollide = false -- visual LOD only; the streamed terrain + pad are the ground
+	ball.CanCollide = false
 	ball.CanQuery = false
 	ball.CanTouch = false
 	ball.CastShadow = false

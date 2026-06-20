@@ -95,15 +95,7 @@ function CameraController:_update(state, info)
 	end
 	self._lastFwd = fwd
 
-	-- The craft's root sits at the engine (base); frame its centre instead, so the
-	-- camera isn't staring at the engine bell.
 	local craftRender = self._origin:ToRender(p)
-	local pd = info and info.pointDir
-	local ch = info and info.craftHeight
-	if typeof(pd) == "Vector3" and ch then
-		craftRender = craftRender + pd.Unit * (ch * 0.5)
-	end
-
 	local behind = CFrame.fromAxisAngle(up, orbit.azimuth) * (-fwd)
 	local offsetDir = behind * math.cos(orbit.elevation) + up * math.sin(orbit.elevation)
 	local camPos = craftRender + offsetDir * orbit.distance
