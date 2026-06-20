@@ -257,11 +257,11 @@ function CraftRenderer:_rebuildCraft()
 	align.Name = "AttitudeAlign"
 	align.Mode = Enum.OrientationAlignmentMode.OneAttachment
 	align.Attachment0 = att
-	align.RigidityEnabled = false
+	-- Rigid attitude hold: the orientation rigidly tracks the target, so the craft
+	-- can never oscillate (shake) or spin. FlightController sets the target CFrame.
+	align.RigidityEnabled = true
 	align.ReactionTorqueEnabled = false
-	align.Responsiveness = Config.PHYSICS.controlResponsiveness
-	align.MaxTorque = 0 -- FlightController sets this each frame (scaled by real mass)
-	align.Enabled = false -- FlightController enables it only while flying (off when landed)
+	align.Enabled = true
 	align.Parent = root
 
 	model.Parent = Workspace

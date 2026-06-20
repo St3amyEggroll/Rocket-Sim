@@ -50,8 +50,6 @@ Config.FLIGHT = {
 Config.PHYSICS = {
 	craftDensity = 0.7, -- a NORMAL density so the body is solid/stable (featherlight
 	-- parts get flung by the solver). The design mass only scales the forces below.
-	controlResponsiveness = 8, -- AlignOrientation responsiveness (gentle: high values shake)
-	controlTorquePerMass = 100, -- AlignOrientation MaxTorque per unit of real mass
 	restSpeed = 2.5, -- below this assembly speed near ground = at rest
 	liftoffSpeed = 8, -- must exceed this (or climb away) to count as airborne again
 	groundContactAlt = 50, -- radar altitude under which "at the surface" applies

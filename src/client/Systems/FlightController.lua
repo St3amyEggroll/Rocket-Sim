@@ -248,6 +248,7 @@ end
 
 function FlightController:_physicsStep(handles, dt, throttle)
 	local root = handles.root
+	root.Anchored = false
 	self:_readState(handles)
 
 	local pos = self._state.position
@@ -263,7 +264,30 @@ function FlightController:_physicsStep(handles, dt, throttle)
 	local sas = self:_updateAttitude(dt, pos, vel)
 	self._sas = sas
 
-	-- Landing / crash classification.
+	local realMass = root.AssemblyMass
+	local designMass = self._vehicle:GetCurrentMass()
+
+	-- Radial gravity at the centre of mass (accel = g regardless of real mass).
+	local g = self._mu / (r * r)
+	handles.gravForce.Force = Vector3.new(-radialUp.x, -radialUp.y, -radialUp.z) * (realMass * g)
+
+	-- Thrust along the nose: target accel = thrust / designMass.
+	local powered = false
+	local thrust = self._vehicle:GetCurrentThrust(throttle)
+	if throttle > 0 and thrust > 0 and designMass > 0 then
+		handles.thrustForce.Force = Vector3.new(0, realMass * (thrust / designMass), 0)
+		self._vehicle:ConsumeFuel(dt, throttle)
+		powered = true
+	else
+		handles.thrustForce.Force = Vector3.zero
+	end
+
+	-- Attitude control is ALWAYS active and rigid: a rocket has no passive stability,
+	-- so it must be held every moment (gating it off near the ground let it tumble).
+	-- It rigidly holds the target orientation, so it cannot oscillate or spin.
+	handles.align.CFrame = self:_alignCFrame()
+
+	-- Landing / crash classification (status only; physics is the same throughout).
 	local wantLanded = (throttle <= 0 and atGround and speed < Config.PHYSICS.restSpeed)
 	if wantLanded and not self._landed then
 		self._landed = true
@@ -275,57 +299,6 @@ function FlightController:_physicsStep(handles, dt, throttle)
 	end
 	if not self._landed then
 		self._peakDescent = math.max(self._peakDescent, -vertSpeed)
-	end
-
-	-- RESTING: once landed with the engine off, anchor the craft so it is rock
-	-- solid. A live body balancing on point-contact legs slowly wobbles, then the
-	-- attitude control fights the ground and flings it -- anchoring kills that
-	-- entirely. Throttling up un-lands it (below) and hands it back to physics.
-	if self._landed and throttle <= 0 then
-		if not root.Anchored then
-			root.Anchored = true
-			root.AssemblyLinearVelocity = Vector3.zero
-			root.AssemblyAngularVelocity = Vector3.zero
-		end
-		handles.align.Enabled = false
-		handles.gravForce.Force = Vector3.zero
-		handles.thrustForce.Force = Vector3.zero
-		self._powered = false
-		self._status = self._crashed and "Crashed" or "Landed"
-		return
-	end
-
-	-- FLYING: live physics. Forces are scaled by the body's REAL (stable) mass so
-	-- the part density can be normal, while the DESIGN mass sets the target
-	-- accelerations (KSP feel).
-	root.Anchored = false
-	local realMass = root.AssemblyMass
-	local designMass = self._vehicle:GetCurrentMass()
-
-	local g = self._mu / (r * r)
-	handles.gravForce.Force = Vector3.new(-radialUp.x, -radialUp.y, -radialUp.z) * (realMass * g)
-
-	local powered = false
-	local thrust = self._vehicle:GetCurrentThrust(throttle)
-	if throttle > 0 and thrust > 0 and designMass > 0 then
-		handles.thrustForce.Force = Vector3.new(0, realMass * (thrust / designMass), 0)
-		self._vehicle:ConsumeFuel(dt, throttle)
-		powered = true
-	else
-		handles.thrustForce.Force = Vector3.zero
-	end
-
-	-- Steering: only when clear of the ground, so the control never fights ground
-	-- contact. Thrust is through the CoM, so the first studs of ascent go straight
-	-- up without it. While disabled, keep the target synced to the craft so the
-	-- control engages seamlessly (no roll snap).
-	handles.align.MaxTorque = realMass * Config.PHYSICS.controlTorquePerMass
-	if radarAlt > Config.PHYSICS.groundContactAlt then
-		handles.align.CFrame = self:_alignCFrame()
-		handles.align.Enabled = true
-	else
-		self._attitude = CFrame.lookAt(Vector3.zero, root.CFrame.UpVector, root.CFrame.LookVector)
-		handles.align.Enabled = false
 	end
 
 	self._powered = powered
@@ -442,6 +415,7 @@ function FlightController:_fire()
 		mode = self._mode:GetMode(),
 		pointDir = nose,
 		attitude = attInfo,
+		craftHeight = self._vehicle:GetHeight(),
 		throttle = self._throttle or 0,
 		warp = self._warp or 1,
 		sas = self._sas or "Manual",
