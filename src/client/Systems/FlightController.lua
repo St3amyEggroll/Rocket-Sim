@@ -255,54 +255,27 @@ end
 
 function FlightController:_physicsStep(handles, dt, throttle)
 	local root = handles.root
-	root.Anchored = false
 	self:_readState(handles)
 
 	local pos = self._state.position
 	local vel = self._state.velocity
 	local r = math.sqrt(pos.x * pos.x + pos.y * pos.y + pos.z * pos.z)
 	local radialUp = unit(pos) or Orbit.vec(0, 1, 0)
-
-	local sas = self:_updateAttitude(dt, pos, vel)
-	self._sas = sas
-
-	-- Forces are scaled by the body's REAL (stable) mass so the part density can be
-	-- normal, while the DESIGN mass only sets the target accelerations (KSP feel).
-	local realMass = root.AssemblyMass
-	local designMass = self._vehicle:GetCurrentMass()
-
-	-- Radial gravity: accelerate at g regardless of the real mass.
-	local g = self._mu / (r * r)
-	handles.gravForce.Force = Vector3.new(-radialUp.x, -radialUp.y, -radialUp.z) * (realMass * g)
-
-	-- Thrust along the nose: target accel = thrust / designMass.
-	local powered = false
-	local thrust = self._vehicle:GetCurrentThrust(throttle)
-	if throttle > 0 and thrust > 0 and designMass > 0 then
-		local accel = thrust / designMass
-		handles.thrustForce.Force = Vector3.new(0, realMass * accel, 0)
-		self._vehicle:ConsumeFuel(dt, throttle)
-		powered = true
-	else
-		handles.thrustForce.Force = Vector3.zero
-	end
-
-	-- Steering authority scales with the real mass so it can actually turn it.
-	handles.align.MaxTorque = realMass * Config.PHYSICS.controlTorquePerMass
-	handles.align.CFrame = self:_alignCFrame(handles)
-
-	-- Landing / crash classification.
 	local surf = Planet.radiusForSim(pos)
 	local radarAlt = r - surf
 	local speed = math.sqrt(vel.x * vel.x + vel.y * vel.y + vel.z * vel.z)
 	local vertSpeed = vel.x * radialUp.x + vel.y * radialUp.y + vel.z * radialUp.z
 	local atGround = radarAlt < Config.PHYSICS.groundContactAlt
 
+	local sas = self:_updateAttitude(dt, pos, vel)
+	self._sas = sas
+
+	-- Landing / crash classification.
 	local wantLanded = (throttle <= 0 and atGround and speed < Config.PHYSICS.restSpeed)
 	if wantLanded and not self._landed then
 		self._landed = true
 		self._crashed = self._peakDescent > Config.FLIGHT.landSpeed
-	elseif self._landed and (speed > Config.PHYSICS.liftoffSpeed or radarAlt > Config.PHYSICS.groundContactAlt * 1.5) then
+	elseif self._landed and (throttle > 0 or speed > Config.PHYSICS.liftoffSpeed or radarAlt > Config.PHYSICS.groundContactAlt * 1.5) then
 		self._landed = false
 		self._crashed = false
 		self._peakDescent = 0
@@ -311,17 +284,57 @@ function FlightController:_physicsStep(handles, dt, throttle)
 		self._peakDescent = math.max(self._peakDescent, -vertSpeed)
 	end
 
+	-- RESTING: once landed with the engine off, anchor the craft so it is rock
+	-- solid. A live body balancing on point-contact legs slowly wobbles, then the
+	-- attitude control fights the ground and flings it -- anchoring kills that
+	-- entirely. Throttling up un-lands it (below) and hands it back to physics.
+	if self._landed and throttle <= 0 then
+		if not root.Anchored then
+			root.Anchored = true
+			root.AssemblyLinearVelocity = Vector3.zero
+			root.AssemblyAngularVelocity = Vector3.zero
+		end
+		handles.align.Enabled = false
+		handles.gravForce.Force = Vector3.zero
+		handles.thrustForce.Force = Vector3.zero
+		self._powered = false
+		self._status = self._crashed and "Crashed" or "Landed"
+		return
+	end
+
+	-- FLYING: live physics. Forces are scaled by the body's REAL (stable) mass so
+	-- the part density can be normal, while the DESIGN mass sets the target
+	-- accelerations (KSP feel).
+	root.Anchored = false
+	local realMass = root.AssemblyMass
+	local designMass = self._vehicle:GetCurrentMass()
+
+	local g = self._mu / (r * r)
+	handles.gravForce.Force = Vector3.new(-radialUp.x, -radialUp.y, -radialUp.z) * (realMass * g)
+
+	local powered = false
+	local thrust = self._vehicle:GetCurrentThrust(throttle)
+	if throttle > 0 and thrust > 0 and designMass > 0 then
+		handles.thrustForce.Force = Vector3.new(0, realMass * (thrust / designMass), 0)
+		self._vehicle:ConsumeFuel(dt, throttle)
+		powered = true
+	else
+		handles.thrustForce.Force = Vector3.zero
+	end
+
+	-- Steering: only when clear of the ground, so the control never fights ground
+	-- contact (which was causing the spin). Thrust is through the CoM, so the first
+	-- studs of ascent go straight up without it.
+	handles.align.MaxTorque = realMass * Config.PHYSICS.controlTorquePerMass
+	handles.align.CFrame = self:_alignCFrame(handles)
+	handles.align.Enabled = radarAlt > Config.PHYSICS.groundContactAlt
+
 	self._powered = powered
 	if self._landed then
 		self._status = self._crashed and "Crashed" or "Landed"
 	else
 		self._status = powered and "Powered" or "Coasting"
 	end
-
-	-- Attitude control acts like reaction wheels: it steers in flight but is
-	-- released once at rest, so a craft on a steep slope (or that came down
-	-- tilted / on no legs) tips over for real instead of being held upright.
-	handles.align.Enabled = not self._landed
 end
 
 function FlightController:_railsStep(handles, dt, warp)
@@ -460,6 +473,14 @@ function FlightController:GetUpdatedSignal()
 end
 function FlightController:GetUpdateCount()
 	return self._updateCount
+end
+function FlightController:GetStatus()
+	return string.format(
+		"%s  landed=%s rails=%s",
+		tostring(self._status),
+		tostring(self._landed),
+		tostring(self._onRails)
+	)
 end
 function FlightController:GetReadout()
 	return Orbit.getReadout(self._state, self._mu, self._bodyRadius)

@@ -58,7 +58,7 @@ Config.PHYSICS = {
 	minWarpAlt = 150, -- time warp (on-rails) only honoured above this altitude
 	partFriction = 0.7, -- so landed craft does not slide
 	partElasticity = 0, -- no bounce
-	spawnClearance = 0.5, -- studs the craft hovers above the pad at spawn (settles down)
+	spawnClearance = 0.1, -- studs above the pad at spawn (it anchors there immediately)
 }
 
 Config.LEGS = {

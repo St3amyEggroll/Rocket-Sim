@@ -90,7 +90,7 @@ function DebugController:Start()
 end
 
 function DebugController:_text()
-	local lines = { "BUILD P5.2 (debug)" }
+	local lines = { "BUILD P5.3 (debug)" }
 	lines[#lines + 1] = "RS frames: " .. self._frames .. "   (` to hide)"
 
 	local Flight = Registry:GetOrNil("FlightController")
@@ -106,6 +106,9 @@ function DebugController:_text()
 			local p = s.position
 			local r = math.sqrt(p.x * p.x + p.y * p.y + p.z * p.z)
 			lines[#lines + 1] = string.format("craft r: %.0f  alt: %.0f", r, r - (Flight:GetBodyRadius()))
+				if Flight.GetStatus then
+					lines[#lines + 1] = "status: " .. Flight:GetStatus()
+				end
 			lines[#lines + 1] = "craft sim: " .. v3str(p)
 			if Origin then
 				lines[#lines + 1] = "origin:    " .. v3str(Origin:GetOrigin())
