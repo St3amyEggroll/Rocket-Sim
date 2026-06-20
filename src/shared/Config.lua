@@ -50,13 +50,15 @@ Config.FLIGHT = {
 Config.PHYSICS = {
 	craftDensity = 0.7, -- a NORMAL density so the body is solid/stable (featherlight
 	-- parts get flung by the solver). The design mass only scales the forces below.
+	controlResponsiveness = 20, -- AlignOrientation responsiveness (reaction-wheel feel)
+	controlTorquePerMass = 150, -- AlignOrientation MaxTorque per unit of real mass
 	restSpeed = 2.5, -- below this assembly speed near ground = at rest
 	liftoffSpeed = 8, -- must exceed this (or climb away) to count as airborne again
 	groundContactAlt = 50, -- radar altitude under which "at the surface" applies
 	minWarpAlt = 150, -- time warp (on-rails) only honoured above this altitude
 	partFriction = 0.7, -- so landed craft does not slide
 	partElasticity = 0, -- no bounce
-	spawnClearance = 0.1, -- studs above the pad at spawn (it anchors there immediately)
+	spawnClearance = 0.5, -- studs the craft's feet start above the pad (settles down)
 }
 
 Config.LEGS = {

@@ -6,8 +6,8 @@
 
 	  * gravity  -> a radial VectorForce (Workspace.Gravity is 0),
 	  * thrust   -> a VectorForce along the nose while throttled (fuel burns),
-	  * steering -> the orientation is set kinematically to the attitude target each
-	                frame (WASD/QE) or a SAS hold (1-5),
+	  * steering -> a soft AlignOrientation toward the attitude target (WASD/QE) or a
+	                SAS hold (1-5),
 	and reads the body's transform/velocity back each frame for everyone else.
 
 	The craft collides, tips and rests on the terrain for real, so landing is
@@ -96,7 +96,11 @@ end
 -- ---------------------------------------------------------------- placement ----
 
 function FlightController:_spawnCFrame()
-	local r = self._launchRadius + Config.LEGS.drop + Config.PHYSICS.spawnClearance
+	-- Place the root so the assembly's true lowest point sits just above the pad
+	-- (the foot balls reach below the leg attachment -- spawning by the attachment
+	-- buried the feet in the pad and the solver flung the craft).
+	local offset = (self._handles and self._handles.bottomOffset) or (Config.LEGS.drop + Config.LEGS.footRadius)
+	local r = self._launchRadius + offset + Config.PHYSICS.spawnClearance
 	return CFrame.fromMatrix(Vector3.new(0, r, 0), Vector3.xAxis, Vector3.yAxis) -- UpVector = +Y = nose
 end
 
@@ -198,8 +202,8 @@ function FlightController:_sasTarget(sas, pos, vel)
 	return nil
 end
 
--- Update the attitude TARGET (LookVector = desired nose). The body's orientation
--- is set to this each frame (kinematic); manual input switches SAS to Manual.
+-- Update the attitude TARGET (LookVector = desired nose). A soft AlignOrientation
+-- drives the body toward this; manual input switches SAS to Manual.
 function FlightController:_updateAttitude(dt, pos, vel)
 	local pitch, yaw, roll = self._input:GetAttitudeInput()
 	local sas = self._input:GetSAS()
@@ -281,13 +285,10 @@ function FlightController:_physicsStep(handles, dt, throttle)
 		handles.thrustForce.Force = Vector3.zero
 	end
 
-	-- Attitude is controlled KINEMATICALLY: the orientation is set directly to the
-	-- target each frame and spin is zeroed. Position stays fully physics-driven
-	-- (gravity, thrust, collisions), so the craft falls / flies / lands for real but
-	-- can never tumble, roll, shake, or pump energy off the ground. (AlignOrientation
-	-- fought the ground contact and flung the craft -- this removes that entirely.)
-	root.CFrame = CFrame.fromMatrix(root.Position, self._attitude.RightVector, self._attitude.LookVector)
-	root.AssemblyAngularVelocity = Vector3.zero
+	-- Soft attitude control toward the (roll-stable) target. Torque scales with mass
+	-- so it can turn the craft; non-rigid so it does not pump energy off the ground.
+	handles.align.MaxTorque = realMass * Config.PHYSICS.controlTorquePerMass
+	handles.align.CFrame = CFrame.fromMatrix(Vector3.zero, self._attitude.RightVector, self._attitude.LookVector)
 
 	-- Landing / crash classification (status only; physics is the same throughout).
 	local wantLanded = (throttle <= 0 and atGround and speed < Config.PHYSICS.restSpeed)

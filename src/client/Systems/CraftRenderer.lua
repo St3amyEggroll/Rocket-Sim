@@ -8,8 +8,8 @@
 	loop drives:
 	  * GravityForce  - a VectorForce applied at the centre of mass (radial gravity),
 	  * ThrustForce   - a VectorForce along the nose, applied at the centre of mass,
-	FlightController sets the forces every frame, sets the orientation kinematically,
-	and reads the body back; this module only builds the hardware and the flame.
+	FlightController sets the forces and the attitude target every frame and reads the
+	body back; this module only builds the hardware and renders the engine flame.
 
 	Custom gravity means Workspace.Gravity is 0; every part's mass is set from the
 	design via density so thrust/gravity produce the tuned accelerations.
@@ -270,20 +270,47 @@ function CraftRenderer:_rebuildCraft()
 	thrustForce.Force = Vector3.zero
 	thrustForce.Parent = root
 
-	-- Orientation is set kinematically by FlightController (no AlignOrientation):
-	-- physics handles translation, the flight loop handles rotation. This avoids the
-	-- rigid-constraint-vs-collision energy pumping that was flinging the craft.
+	-- Soft (non-rigid) attitude control, like reaction wheels: applies bounded torque
+	-- toward the target orientation and damps rotation. Non-rigid so it does not pump
+	-- energy off ground contact (the rigid version flung the craft). FlightController
+	-- sets its CFrame / MaxTorque each frame.
+	local align = Instance.new("AlignOrientation")
+	align.Name = "AttitudeAlign"
+	align.Mode = Enum.OrientationAlignmentMode.OneAttachment
+	align.Attachment0 = att
+	align.RigidityEnabled = false
+	align.ReactionTorqueEnabled = false
+	align.Responsiveness = Config.PHYSICS.controlResponsiveness
+	align.MaxTorque = 0
+	align.Enabled = true
+	align.Parent = root
 
 	model.Parent = Workspace
+
+	-- The assembly's lowest COLLIDABLE point below the root (the foot balls reach
+	-- below the leg attachment), so FlightController can spawn it resting ON the pad
+	-- rather than inside it. The flame is non-colliding, so it is ignored.
+	local minY = 0 -- root is at model origin
+	for _, p in ipairs(model:GetDescendants()) do
+		if p:IsA("BasePart") and p.CanCollide then
+			local low = p.Position.Y - p.Size.Magnitude * 0.5 -- conservative sphere bound
+			if low < minY then
+				minY = low
+			end
+		end
+	end
+	local bottomOffset = -minY
 
 	self._craft = {
 		model = model,
 		root = root,
 		gravForce = gravForce,
 		thrustForce = thrustForce,
+		align = align,
 		flame = flame,
 		flameLight = light,
 		bottomRadius = bottomRadius,
+		bottomOffset = bottomOffset,
 	}
 end
 
