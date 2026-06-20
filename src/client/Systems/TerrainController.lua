@@ -1,18 +1,15 @@
 --[[
 	TerrainController
-	Owner of: the planet's appearance at two levels of detail.
+	Owner of: the HIGH-detail planet surface (real Roblox terrain). The always-
+	visible low-detail body (the grass Ball) is owned by PlanetRenderer.
 
-	  * The LOW-detail body is a real grass Ball part (Planet.lodRadius()). It is a
-	    genuine part (<=1024 radius), so it renders at any distance and never culls.
-	    It is always present and is what you see from orbit.
-
-	  * The HIGH-detail surface is real Roblox terrain laid by RENDER DISTANCE, not
-	    generation. The planet's heightfield is fixed (Shared.Planet), and the world
-	    is divided into fixed cube CHUNKS. A chunk loads when it comes within
-	    Config.TERRAIN.renderDistance of the craft and unloads when it leaves;
-	    a chunk that is already loaded is never re-laid, so terrain that scrolls past
-	    you stays put rather than regenerating. Climb past streamOutAlt and every
-	    chunk unloads, leaving the Ball as the LOD.
+	Terrain is laid by RENDER DISTANCE around the CRAFT, not by generation and not
+	by the camera. The planet's heightfield is fixed (Shared.Planet), and the world
+	is divided into fixed cube CHUNKS. A chunk loads when it comes within
+	Config.TERRAIN.renderDistance of the craft and unloads when it leaves; a chunk
+	that is already loaded is never re-laid, so terrain that scrolls past you stays
+	put rather than regenerating. Climb past streamOutAlt and every chunk unloads,
+	leaving the Ball as the LOD.
 
 	The floating origin is fixed at the body centre, so terrain world coordinates
 	equal sim coordinates and the chunks line up with the heightfield exactly.
@@ -43,8 +40,6 @@ function TerrainController:Init()
 end
 
 function TerrainController:Start()
-	self:_buildBody()
-
 	local terrain = Workspace.Terrain
 	terrain:Clear()
 	pcall(function()
@@ -55,23 +50,6 @@ function TerrainController:Start()
 	Flight:GetUpdatedSignal():Connect(function(state)
 		self:_onUpdate(state)
 	end)
-end
-
--- The always-present low-detail body.
-function TerrainController:_buildBody()
-	local body = Config.BODY
-	local lod = Planet.lodRadius()
-	local planet = Instance.new("Part")
-	planet.Name = "Planet"
-	planet.Shape = Enum.PartType.Ball
-	planet.Size = Vector3.new(lod * 2, lod * 2, lod * 2) -- <=2048 diameter: a real, never-culled part
-	planet.Anchored = true
-	planet.CanCollide = true
-	planet.Color = body.grassColor
-	planet.Material = GRASS
-	planet.CFrame = CFrame.new(0, 0, 0)
-	planet.Parent = Workspace
-	self._planet = planet
 end
 
 -- Per-frame: keep the fill queue moving, and (throttled) rescan render distance.

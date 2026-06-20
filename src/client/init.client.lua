@@ -26,6 +26,7 @@ local initOrder = {
 	"InputController",
 	"FlightController",
 	"CameraController",
+	"PlanetRenderer",
 	"CraftRenderer",
 	"CrewController",
 	"MapViewController",
@@ -46,6 +47,7 @@ local startOrder = {
 	"FloatingOriginController",
 	"InputController",
 	"CameraController",
+	"PlanetRenderer",
 	"CraftRenderer",
 	"CrewController",
 	"MapViewController",
@@ -87,4 +89,4 @@ for _, name in ipairs(startOrder) do
 	end
 end
 
-print("[RocketSim] Client systems started -- build P4.0 (render-distance Perlin terrain + surface landing).")
+print("[RocketSim] Client systems started -- build P4.1 (always-visible planet proxy; craft-based terrain).")

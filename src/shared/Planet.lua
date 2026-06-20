@@ -62,7 +62,7 @@ end
 -- The Ball LOD radius: just below the lowest possible terrain so the smooth
 -- sphere never pokes up through a terrain valley while the crust is loaded.
 function Planet.lodRadius(): number
-	return R - AMP - 6
+	return R - AMP - 1
 end
 
 return Planet
