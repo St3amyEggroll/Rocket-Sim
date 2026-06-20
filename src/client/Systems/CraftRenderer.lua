@@ -11,8 +11,8 @@ local Lighting = game:GetService("Lighting")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 
 local Orbit = require(Shared:WaitForChild("OrbitMechanics"))
-local Config = require(Shared:WaitForChild("Config"))
 local Registry = require(Shared:WaitForChild("Registry"))
+local Planet = require(Shared:WaitForChild("Planet"))
 
 local CraftRenderer = {}
 
@@ -101,13 +101,14 @@ function CraftRenderer:_setupLighting()
 end
 
 function CraftRenderer:_buildPad()
-	-- Fixed at the +Y launch pole (origin is fixed, so this never moves).
-	local R = Config.BODY.radius
+	-- Fixed at the +Y launch pole, top flush with the terrain there (origin is
+	-- fixed, so this never moves). CanCollide so the pad reads as solid ground.
+	local surf = Planet.radiusForUnit(0, 1, 0)
 	makePart(Workspace, "LaunchPad", {
 		Size = Vector3.new(120, 8, 120),
 		Color = Color3.fromRGB(90, 92, 100),
 		Material = Enum.Material.Metal,
-		CFrame = CFrame.new(0, R - 4, 0),
+		CFrame = CFrame.new(0, surf - 4, 0),
 	})
 end
 

@@ -17,6 +17,7 @@ local Orbit = require(Shared:WaitForChild("OrbitMechanics"))
 local Config = require(Shared:WaitForChild("Config"))
 local Registry = require(Shared:WaitForChild("Registry"))
 local Signal = require(Shared:WaitForChild("Signal"))
+local Planet = require(Shared:WaitForChild("Planet"))
 
 local FlightController = {}
 
@@ -34,13 +35,16 @@ function FlightController:Init()
 	self._bodyRadius = body.radius
 	self._turnStart = Config.LAUNCH.turnStartAlt
 	self._turnEnd = Config.LAUNCH.turnEndAlt
+	-- Launch site at the +Y pole, sitting on the terrain height there.
+	self._launchRadius = Planet.radiusForSim(Orbit.vec(0, body.radius, 0))
 
-	-- Launch site at the +Y pole; nose points radial-out (+Y).
-	self._state = { position = Orbit.vec(0, body.radius, 0), velocity = Orbit.vec(0, 0, 0) }
+	-- Nose points radial-out (+Y).
+	self._state = { position = Orbit.vec(0, self._launchRadius, 0), velocity = Orbit.vec(0, 0, 0) }
 	self._attitude = CFrame.lookAt(Vector3.zero, Vector3.yAxis, Vector3.xAxis)
 	self._status = "VAB"
 	self._powered = false
 	self._landed = true
+	self._crashed = false
 	self._updateCount = 0
 	self.Updated = Signal.new()
 end
@@ -69,9 +73,10 @@ end
 
 function FlightController:_onMode(mode)
 	self._vehicle:ResetRuntime()
-	self._state = { position = Orbit.vec(0, self._bodyRadius, 0), velocity = Orbit.vec(0, 0, 0) }
+	self._state = { position = Orbit.vec(0, self._launchRadius, 0), velocity = Orbit.vec(0, 0, 0) }
 	self._attitude = CFrame.lookAt(Vector3.zero, Vector3.yAxis, Vector3.xAxis)
 	self._landed = true
+	self._crashed = false
 	self._status = (mode == "Flight") and "Landed" or "VAB"
 	self._origin:SetOrigin(Orbit.vec(0, 0, 0))
 end
@@ -189,7 +194,7 @@ function FlightController:_step(rawDt)
 	local powered = false
 
 	if self._landed and throttle <= 0 then
-		self._status = "Landed"
+		self._status = self._crashed and "Crashed" or "Landed"
 	else
 		local accelMag = self._vehicle:GetThrustAccel(throttle)
 		if throttle > 0 and accelMag > 0 then
@@ -205,12 +210,18 @@ function FlightController:_step(rawDt)
 
 		local p = self._state.position
 		local nr = math.sqrt(p.x * p.x + p.y * p.y + p.z * p.z)
-		if nr < self._bodyRadius then
-			local s = self._bodyRadius / nr
+		local surf = Planet.radiusForSim(p) -- terrain height beneath the craft
+		if nr < surf then
+			-- Touchdown: classify soft landing vs crash by impact speed.
+			local impact = math.sqrt(
+				self._state.velocity.x ^ 2 + self._state.velocity.y ^ 2 + self._state.velocity.z ^ 2
+			)
+			local s = surf / nr
 			self._state.position = Orbit.vec(p.x * s, p.y * s, p.z * s)
 			self._state.velocity = Orbit.vec(0, 0, 0)
 			self._landed = true
-			self._status = "Landed"
+			self._crashed = impact > Config.FLIGHT.landSpeed
+			self._status = self._crashed and "Crashed" or "Landed"
 		else
 			self._landed = false
 			self._status = powered and "Powered" or "Coasting"

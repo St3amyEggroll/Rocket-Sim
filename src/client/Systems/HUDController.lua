@@ -13,6 +13,7 @@ local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Orbit = require(Shared:WaitForChild("OrbitMechanics"))
 local Config = require(Shared:WaitForChild("Config"))
 local Registry = require(Shared:WaitForChild("Registry"))
+local Planet = require(Shared:WaitForChild("Planet"))
 
 local HUDController = {}
 
@@ -112,11 +113,13 @@ function HUDController:_build(parent)
 
 	local L = self._labels
 	L.altitude = newRow(readout, 1, 18, 15)
-	L.speed = newRow(readout, 2, 18, 15)
-	L.apoapsis = newRow(readout, 3, 18, 15)
-	L.periapsis = newRow(readout, 4, 18, 15)
-	L.ecc = newRow(readout, 5, 18, 15)
-	L.period = newRow(readout, 6, 18, 15)
+	L.radar = newRow(readout, 2, 18, 15)
+	L.speed = newRow(readout, 3, 18, 15)
+	L.vspeed = newRow(readout, 4, 18, 15)
+	L.apoapsis = newRow(readout, 5, 18, 15)
+	L.periapsis = newRow(readout, 6, 18, 15)
+	L.ecc = newRow(readout, 7, 18, 15)
+	L.period = newRow(readout, 8, 18, 15)
 
 	-- Vehicle panel (bottom-left).
 	local veh = newPanel(gui, 250, Vector2.new(0, 1), UDim2.new(0, 16, 1, -16))
@@ -147,8 +150,21 @@ function HUDController:_update(state, info)
 	local r = Orbit.getReadout(state, info.mu, info.bodyRadius)
 	local L = self._labels
 
+	-- Radar altitude (height above the actual terrain) and vertical speed help
+	-- with landing; sea-level altitude/apsides remain relative to the datum.
+	local p = state.position
+	local rMag = math.sqrt(p.x * p.x + p.y * p.y + p.z * p.z)
+	local radarAlt = rMag - Planet.radiusForSim(p)
+	local vertSpeed = 0
+	if rMag > 1e-6 then
+		local v = state.velocity
+		vertSpeed = (v.x * p.x + v.y * p.y + v.z * p.z) / rMag
+	end
+
 	L.altitude.Text = "Altitude:  " .. fmt(r.altitude)
+	L.radar.Text = "Radar alt: " .. fmt(radarAlt)
 	L.speed.Text = "Speed:     " .. fmt(r.speed) .. " st/s"
+	L.vspeed.Text = "Vert spd:  " .. fmt(vertSpeed) .. " st/s"
 	L.apoapsis.Text = "Apoapsis:  " .. (r.apoapsis == math.huge and "--" or fmt(r.apoapsis))
 	L.periapsis.Text = "Periapsis: " .. fmt(r.periapsis)
 	L.ecc.Text = "Ecc:       " .. string.format("%.4f", r.eccentricity)
@@ -157,6 +173,8 @@ function HUDController:_update(state, info)
 	local statusColor
 	if info.status == "Powered" then
 		statusColor = Color3.fromRGB(120, 255, 140)
+	elseif info.status == "Crashed" then
+		statusColor = Color3.fromRGB(255, 90, 90)
 	elseif info.status == "Landed" then
 		statusColor = Color3.fromRGB(255, 200, 120)
 	else
