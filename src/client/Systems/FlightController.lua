@@ -228,20 +228,13 @@ function FlightController:_updateAttitude(dt, pos, vel)
 	return sas
 end
 
--- AlignOrientation CFrame whose UpVector is the TARGET nose (root +Y aligns to it).
--- The roll axis is taken from the craft's CURRENT orientation, so the control only
--- ever corrects pitch/yaw to point the nose and never fights/snaps roll (which was
--- causing the craft to spin out on launch).
-function FlightController:_alignCFrame(handles)
-	local nose = self._attitude.LookVector
-	local cr = handles.root.CFrame.RightVector
-	local right = cr - nose * cr:Dot(nose) -- current right, projected off the nose
-	if right.Magnitude < 1e-3 then
-		cr = handles.root.CFrame.UpVector
-		right = cr - nose * cr:Dot(nose)
-	end
-	right = (right.Magnitude > 1e-3) and right.Unit or Vector3.xAxis
-	return CFrame.fromMatrix(Vector3.zero, right, nose)
+-- AlignOrientation CFrame whose UpVector is the target nose (root +Y aligns to it).
+-- Using the attitude's OWN right axis (a stable reference) means the control damps
+-- roll/spin, instead of free-spinning about the nose. It is only ever enabled well
+-- clear of the ground and the target is synced to the craft while disabled, so it
+-- never snaps when it engages.
+function FlightController:_alignCFrame()
+	return CFrame.fromMatrix(Vector3.zero, self._attitude.RightVector, self._attitude.LookVector)
 end
 
 -- --------------------------------------------------------------------- loop ----
@@ -323,11 +316,17 @@ function FlightController:_physicsStep(handles, dt, throttle)
 	end
 
 	-- Steering: only when clear of the ground, so the control never fights ground
-	-- contact (which was causing the spin). Thrust is through the CoM, so the first
-	-- studs of ascent go straight up without it.
+	-- contact. Thrust is through the CoM, so the first studs of ascent go straight
+	-- up without it. While disabled, keep the target synced to the craft so the
+	-- control engages seamlessly (no roll snap).
 	handles.align.MaxTorque = realMass * Config.PHYSICS.controlTorquePerMass
-	handles.align.CFrame = self:_alignCFrame(handles)
-	handles.align.Enabled = radarAlt > Config.PHYSICS.groundContactAlt
+	if radarAlt > Config.PHYSICS.groundContactAlt then
+		handles.align.CFrame = self:_alignCFrame()
+		handles.align.Enabled = true
+	else
+		self._attitude = CFrame.lookAt(Vector3.zero, root.CFrame.UpVector, root.CFrame.LookVector)
+		handles.align.Enabled = false
+	end
 
 	self._powered = powered
 	if self._landed then
