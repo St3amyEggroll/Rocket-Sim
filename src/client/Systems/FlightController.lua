@@ -213,13 +213,16 @@ end
 -- that clears the drawn planet clears the real surface). Returns scale + the
 -- render extent the map camera should frame.
 function FlightController:_mapInfo()
-	-- Small world: map is drawn at TRUE scale around the real terrain planet.
+	-- Compress the whole body+orbit to a fixed render size near the origin so it
+	-- always fits on screen and renders, regardless of how large the orbit is.
+	-- Returns (scale, frameRenderSize): everything is drawn at *scale, framed to size.
 	local p = self._state.position
 	local rNow = math.sqrt(p.x * p.x + p.y * p.y + p.z * p.z)
 	local ro = Orbit.getReadout(self._state, self._mu)
 	local apoR = (ro.apoapsis < math.huge) and ro.apoapsis or rNow
-	local frameRender = math.max(apoR, rNow, self._bodyRadius * 1.3)
-	return 1, frameRender
+	local frameR = math.max(apoR, rNow, self._bodyRadius * 1.3)
+	local frame = Config.MAP.frameSize
+	return frame / frameR, frame
 end
 
 function FlightController:_fire(extra)

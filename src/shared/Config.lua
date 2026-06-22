@@ -12,8 +12,8 @@ local Config = {}
 
 Config.BODY = {
 	name = "Terra",
-	radius = 15000, -- drawn as a scaled mesh sphere (PlanetRenderer)
-	mu = 3.375e9, -- surface gravity ~15 studs/s^2 (g = mu / radius^2)
+	radius = 10000, -- drawn as a scaled mesh sphere (PlanetRenderer)
+	mu = 1.5e9, -- surface gravity ~15 studs/s^2 (g = mu / radius^2)
 	seed = 1337,
 	grassColor = Color3.fromRGB(86, 140, 74),
 	hillColor = Color3.fromRGB(74, 124, 66),
@@ -63,17 +63,29 @@ Config.ATMOSPHERE = {
 -- always render no matter how far the craft is from the world origin.
 Config.SKY = {
 	starCount = 3200,
+	sunAngularSize = 24, -- Roblox native Sun disk size
+	moonAngularSize = 18, -- Roblox native Moon disk size
 	blendStartAlt = 300, -- at/below this altitude the sky is fully atmospheric (blue)
-	blendEndAlt = 2800, -- at/above this altitude the sky is fully space (dark + stars)
+	blendEndAlt = 2700, -- at/above this altitude the sky is fully space (dark + stars)
 	dayClockTime = 14, -- atmosphere: midday sun, blue sky
-	spaceClockTime = 22.5, -- space: night side, stars out
+	spaceClockTime = 24, -- space: full night, stars out (true dark sky)
 	groundBrightness = 2.6,
-	spaceBrightness = 1.8,
+	spaceBrightness = 1.7,
 	groundAmbient = Color3.fromRGB(80, 84, 96),
-	spaceAmbient = Color3.fromRGB(30, 32, 42), -- not pitch black, so the craft stays visible
+	spaceAmbient = Color3.fromRGB(44, 48, 60), -- lights the craft; the dark sky is from ClockTime, not ambient
 	groundOutdoor = Color3.fromRGB(150, 152, 160),
-	spaceOutdoor = Color3.fromRGB(44, 46, 58),
+	spaceOutdoor = Color3.fromRGB(56, 60, 74),
 	atmoDensity = 0.32, -- Atmosphere instance density at sea level
+	-- Map view always looks like space (no atmosphere fog) regardless of altitude.
+	mapAmbient = Color3.fromRGB(74, 78, 92),
+	mapOutdoor = Color3.fromRGB(86, 90, 104),
+	mapBrightness = 2.2,
+}
+
+-- Map view draws a COMPRESSED copy of the body + orbit (scaled to this render size)
+-- near the origin, so it always fits on screen and renders regardless of orbit size.
+Config.MAP = {
+	frameSize = 8000,
 }
 
 Config.CRAFT = {

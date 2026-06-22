@@ -26,6 +26,7 @@ local SkyController = {}
 
 function SkyController:Init()
 	self._alt = 0
+	self._mapMode = false
 	self._bodyRadius = Config.BODY.radius
 end
 
@@ -33,9 +34,10 @@ function SkyController:Start()
 	local Flight = Registry:Get("FlightController")
 	self:_setupSky()
 
-	Flight:GetUpdatedSignal():Connect(function(state)
+	Flight:GetUpdatedSignal():Connect(function(state, info)
 		local p = state.position
 		self._alt = math.sqrt(p.x * p.x + p.y * p.y + p.z * p.z) - self._bodyRadius
+		self._mapMode = info and info.mapMode or false
 	end)
 
 	RunService:BindToRenderStep("RocketSim_Sky", Enum.RenderPriority.Camera.Value + 3, function()
@@ -53,6 +55,8 @@ function SkyController:_setupSky()
 	local sky = Lighting:FindFirstChildOfClass("Sky") or Instance.new("Sky")
 	sky.StarCount = Config.SKY.starCount
 	sky.CelestialBodiesShown = true -- Roblox's Sun + Moon + stars
+	sky.SunAngularSize = Config.SKY.sunAngularSize
+	sky.MoonAngularSize = Config.SKY.moonAngularSize
 	sky.Parent = Lighting
 
 	local atmo = Lighting:FindFirstChildOfClass("Atmosphere") or Instance.new("Atmosphere")
@@ -67,9 +71,24 @@ end
 
 function SkyController:_update()
 	local SKY = Config.SKY
-	local t = math.clamp((self._alt - SKY.blendStartAlt) / (SKY.blendEndAlt - SKY.blendStartAlt), 0, 1)
+
+	-- Map view is always space: a dark, star-lit sky with NO atmosphere fog, whatever
+	-- the craft's altitude, so the orbit reads clearly.
+	if self._mapMode then
+		Lighting.ClockTime = SKY.spaceClockTime
+		Lighting.Brightness = SKY.mapBrightness
+		Lighting.Ambient = SKY.mapAmbient
+		Lighting.OutdoorAmbient = SKY.mapOutdoor
+		if self._atmo then
+			self._atmo.Density = 0
+			self._atmo.Haze = 0
+			self._atmo.Glare = 0
+		end
+		return
+	end
 
 	-- Atmosphere (blue, day) -> Space (dark, stars).
+	local t = math.clamp((self._alt - SKY.blendStartAlt) / (SKY.blendEndAlt - SKY.blendStartAlt), 0, 1)
 	Lighting.ClockTime = SKY.dayClockTime + (SKY.spaceClockTime - SKY.dayClockTime) * t
 	Lighting.Brightness = SKY.groundBrightness + (SKY.spaceBrightness - SKY.groundBrightness) * t
 	Lighting.Ambient = SKY.groundAmbient:Lerp(SKY.spaceAmbient, t)

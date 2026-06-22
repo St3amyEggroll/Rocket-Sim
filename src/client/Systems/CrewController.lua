@@ -121,6 +121,16 @@ function CrewController:_ride(state, info)
 		return
 	end
 
+	-- Map view shows a compressed orbit near the origin; hide the real rider.
+	if info and info.mapMode then
+		if model.Parent then
+			model.Parent = nil
+		end
+		return
+	elseif not model.Parent then
+		model.Parent = Workspace
+	end
+
 	-- Ride along the rocket's nose (pointDir is a Vector3 = attitude.LookVector).
 	local pd = info and info.pointDir
 	local up

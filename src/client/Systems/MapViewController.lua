@@ -109,6 +109,25 @@ function MapViewController:_buildPool()
 	self._apoLabel = markerLabel(self._apoMarker, "Ap")
 	self._periLabel = markerLabel(self._periMarker, "Pe")
 	markerLabel(self._craftMarker, "CRAFT")
+
+	-- Compressed body for the map (mesh sphere so it can be any size). Sized + placed
+	-- each frame; only shown in map view.
+	local planet = Instance.new("Part")
+	planet.Name = "MapPlanet"
+	planet.Anchored = true
+	planet.CanCollide = false
+	planet.CanQuery = false
+	planet.CanTouch = false
+	planet.CastShadow = false
+	planet.Size = Vector3.new(2048, 2048, 2048)
+	planet.Color = Config.BODY.grassColor
+	planet.Material = Enum.Material.SmoothPlastic
+	planet.Parent = folder
+	local pmesh = Instance.new("SpecialMesh")
+	pmesh.MeshType = Enum.MeshType.Sphere
+	pmesh.Parent = planet
+	self._mapPlanet = planet
+	self._mapPlanetMesh = pmesh
 end
 
 function MapViewController:_setVisible(v)
@@ -119,6 +138,7 @@ function MapViewController:_setVisible(v)
 	self._apoMarker.Transparency = v and 0 or 1
 	self._periMarker.Transparency = v and 0 or 1
 	self._craftMarker.Transparency = v and 0 or 1
+	self._mapPlanet.Transparency = v and 0 or 1
 end
 
 function MapViewController:_recompute(state)
@@ -182,8 +202,14 @@ function MapViewController:_update(state, info)
 	local function projSim(sp)
 		return focus + Vector3.new(sp.x, sp.y, sp.z) * s
 	end
-	local thickness = self._bodyRadius * 0.03
-	local mk = self._bodyRadius * 0.08
+	local thickness = self._bodyRadius * s * 0.03
+	local mk = self._bodyRadius * s * 0.08
+
+	-- Compressed body sphere at the focus (sea-level radius * scale).
+	local pd = self._bodyRadius * s * 2
+	local psc = pd / 2048
+	self._mapPlanetMesh.Scale = Vector3.new(psc, psc, psc)
+	self._mapPlanet.CFrame = CFrame.new(focus)
 
 	-- Orbit line; segments below the surface go red (impact warning).
 	local pts = self._simPath

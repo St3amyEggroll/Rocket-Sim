@@ -70,6 +70,7 @@ end
 
 function PlanetRenderer:Start()
 	self._origin = Registry:Get("FloatingOriginController")
+	self._input = Registry:Get("InputController")
 
 	self._ball, self._ballMesh = self:_makeSphere("Planet", Config.BODY.grassColor, Enum.Material.Grass, 0)
 	-- Translucent atmosphere shell (purely cosmetic), drawn concentric with the body.
@@ -92,6 +93,18 @@ function PlanetRenderer:_update()
 	local cam = Workspace.CurrentCamera
 	if not cam or not self._ball then
 		return
+	end
+
+	-- Map view draws its own compressed body (MapViewController); hide the real one.
+	if self._input:GetMapMode() then
+		if self._ball.Transparency ~= 1 then
+			self._ball.Transparency = 1
+			self._atmo.Transparency = 1
+		end
+		return
+	elseif self._ball.Transparency ~= 0 then
+		self._ball.Transparency = 0
+		self._atmo.Transparency = 0.55
 	end
 
 	local center = self._origin:ToRender(Orbit.vec(0, 0, 0))

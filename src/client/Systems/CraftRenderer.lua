@@ -280,6 +280,16 @@ function CraftRenderer:_render(state, info)
 	local v = state.velocity
 	self._lastVel = Vector3.new(v.x, v.y, v.z) -- separation velocity for spent stages
 
+	-- Map view draws a compressed orbit near the origin; hide the real (true-scale) craft.
+	if info and info.mapMode then
+		if self._craft and self._craft.Parent then
+			self._craft.Parent = nil
+		end
+		return
+	elseif self._craft and not self._craft.Parent then
+		self._craft.Parent = Workspace
+	end
+
 	-- Crash = explosion: blow up once, then there's nothing left to render until relaunch.
 	if info and info.status == "Crashed" then
 		if not self._exploded then
