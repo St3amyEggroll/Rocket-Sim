@@ -27,7 +27,9 @@ function CameraController:Init() end
 function CameraController:Start()
 	self._input = Registry:Get("InputController")
 	self._origin = Registry:Get("FloatingOriginController")
-	local Flight = Registry:Get("FlightController")
+	self._vehicle = Registry:Get("VehicleController")
+	self._flight = Registry:Get("FlightController")
+	local Flight = self._flight
 	self._bodyRadius = Flight:GetBodyRadius()
 
 	local cam = Workspace.CurrentCamera
@@ -59,6 +61,22 @@ function CameraController:_update(state, info)
 	end
 
 	local orbit = self._input:GetCameraOrbit()
+
+	-- VAB: orbit the rocket on the pad so you can build it in 3D.
+	if info and info.mode == "VAB" then
+		local base = self._origin:ToRender(self._flight:GetLaunchPosition())
+		local h = self._vehicle:GetHeight()
+		local target = base + Vector3.new(0, math.max(h * 0.5, 6), 0)
+		local cosE = math.cos(orbit.elevation)
+		local dir = Vector3.new(
+			math.cos(orbit.azimuth) * cosE,
+			math.sin(orbit.elevation),
+			math.sin(orbit.azimuth) * cosE
+		)
+		local distance = math.max(orbit.distance, h * 1.1 + 24)
+		cam.CFrame = CFrame.lookAt(target + dir * distance, target)
+		return
+	end
 
 	if self._input:GetMapMode() then
 		local target = self._origin:ToRender(Orbit.vec(0, 0, 0))

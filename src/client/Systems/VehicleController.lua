@@ -113,7 +113,7 @@ function VehicleController:GetActiveLayout()
 	for i, def in ipairs(self._design) do
 		local st = stageOf[i] or 0
 		if st == 0 or st >= self._stageIndex then
-			out[#out + 1] = { def = def, stage = st }
+			out[#out + 1] = { def = def, stage = st, index = i }
 		end
 	end
 	return out

@@ -404,6 +404,10 @@ end
 function FlightController:GetBodyRadius()
 	return self._bodyRadius
 end
+-- Sim position of the launch pad base (the VAB build origin / nose points +Y here).
+function FlightController:GetLaunchPosition()
+	return Orbit.vec(0, self._launchRadius, 0)
+end
 function FlightController:GetUpdatedSignal()
 	return self.Updated
 end

@@ -1,20 +1,19 @@
 --[[
 	VABController
-	Owner of: the Vehicle Assembly Building UI (shown only in VAB mode).
+	Owner of: the Vehicle Assembly Building UI + the 3D in-world build interaction.
 
-	KSP-style DRAG-AND-DROP assembly:
-	  Left   = parts palette (category tabs). DRAG a part onto the rocket to add it.
-	  Centre = the rocket, built bottom -> top. The first part dropped is the anchor;
-	           each further part snaps in where you drop it (a guide line shows where).
-	           Click a part to select it.
-	  Right  = the selected part's stats, plus the whole-craft summary + a Remove.
-	  Bottom = LAUNCH / CLEAR.
+	KSP-style: the parts live in a UI panel (LEFT), but you GRAB a part and it becomes
+	a real 3D ghost in the world that snaps onto the actual rocket's attach nodes;
+	click to place it. The first part is the anchor and the rest stack onto it. Click
+	a placed part to select it; its stats show on the RIGHT.
 
-	It drives the design through VehicleController (InsertPart / RemovePart / Clear)
-	and the mode through GameModeController; it owns no flight state.
+	UI is for choosing parts + data only; the building itself happens on the 3D rocket
+	(rendered by CraftRenderer, framed by the VAB orbit camera in CameraController).
 ]]
 
 local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
@@ -24,13 +23,11 @@ local Catalog = require(Shared:WaitForChild("PartCatalog"))
 
 local VABController = {}
 
-local DARK = Color3.fromRGB(14, 16, 22)
 local PANEL = Color3.fromRGB(20, 23, 31)
 local ROW = Color3.fromRGB(30, 34, 44)
 local ACCENT = Color3.fromRGB(120, 200, 255)
 local TEXT = Color3.fromRGB(230, 234, 240)
 local DIM = Color3.fromRGB(150, 158, 170)
-local PX_PER_STUD = 7 -- vertical scale of the rocket diagram
 
 local CATS = {
 	{ id = "command", label = "Pods", color = Color3.fromRGB(90, 150, 230) },
@@ -54,7 +51,7 @@ local function panel(parent, pos, size, title)
 	f.Position = pos
 	f.Size = size
 	f.BackgroundColor3 = PANEL
-	f.BackgroundTransparency = 0.1
+	f.BackgroundTransparency = 0.08
 	f.BorderSizePixel = 0
 	f.Parent = parent
 	corner(f, 10)
@@ -74,43 +71,48 @@ end
 function VABController:Init()
 	self._partCards = {}
 	self._tabBtns = {}
-	self._blocks = {}
 	self._activeCat = CATS[1].id
 	self._selected = nil
-	self._drag = nil
-	self._dropIndex = nil
+	self._placing = nil
+	self._snapIndex = nil
 end
 
 function VABController:Start()
 	self._vehicle = Registry:Get("VehicleController")
 	self._mode = Registry:Get("GameModeController")
+	self._origin = Registry:Get("FloatingOriginController")
+	self._flight = Registry:Get("FlightController")
 	local player = Players.LocalPlayer
 
 	self:_build(player:WaitForChild("PlayerGui"))
+	self:_makeNodeIndicator()
 
 	self._vehicle.Changed:Connect(function()
 		self:_refresh()
 	end)
 	self._mode.ModeChanged:Connect(function(m)
-		self._gui.Enabled = (m == "VAB")
-		if m ~= "VAB" then
-			self:_cancelDrag()
+		local vab = (m == "VAB")
+		self._gui.Enabled = vab
+		if not vab then
+			self:_endPlacing()
 		end
 	end)
 	self._gui.Enabled = (self._mode:GetMode() == "VAB")
 
-	UserInputService.InputChanged:Connect(function(input)
-		self:_onInputChanged(input)
+	UserInputService.InputBegan:Connect(function(input, gameProcessed)
+		self:_onInput(input, gameProcessed)
 	end)
-	UserInputService.InputEnded:Connect(function(input)
-		self:_onInputEnded(input)
+	RunService:BindToRenderStep("RocketSim_VAB", Enum.RenderPriority.Camera.Value + 1, function()
+		if self._placing then
+			self:_updateGhost()
+		end
 	end)
 
 	self:_renderPalette()
 	self:_refresh()
 end
 
--- ---------------------------------------------------------------- build ----
+-- ---------------------------------------------------------------- UI ----
 
 function VABController:_build(parentGui)
 	local gui = Instance.new("ScreenGui")
@@ -121,48 +123,24 @@ function VABController:_build(parentGui)
 	gui.Parent = parentGui
 	self._gui = gui
 
-	local bg = Instance.new("Frame")
-	bg.Size = UDim2.fromScale(1, 1)
-	bg.BackgroundColor3 = Color3.fromRGB(8, 9, 13)
-	bg.BackgroundTransparency = 0.35
-	bg.BorderSizePixel = 0
-	bg.Parent = gui
-
-	local root = Instance.new("Frame")
-	root.AnchorPoint = Vector2.new(0.5, 0)
-	root.Position = UDim2.new(0.5, 0, 0, 14)
-	root.Size = UDim2.fromOffset(948, 528)
-	root.BackgroundTransparency = 1
-	root.Parent = gui
-
 	local title = Instance.new("TextLabel")
-	title.Size = UDim2.new(1, 0, 0, 34)
+	title.AnchorPoint = Vector2.new(0.5, 0)
+	title.Position = UDim2.new(0.5, 0, 0, 12)
+	title.Size = UDim2.fromOffset(560, 30)
 	title.BackgroundTransparency = 1
 	title.Font = Enum.Font.GothamBold
-	title.TextSize = 24
+	title.TextSize = 22
 	title.TextColor3 = ACCENT
 	title.Text = "VEHICLE ASSEMBLY BUILDING"
-	title.Parent = root
+	title.Parent = gui
 
-	self:_buildPalette(root)
-	self:_buildCanvas(root)
-	self:_buildRight(root)
-	self:_buildControls(root)
-
-	-- Drop guide line (where a dragged part will snap in) + drag layer live on the gui.
-	local line = Instance.new("Frame")
-	line.Name = "DropLine"
-	line.BackgroundColor3 = ACCENT
-	line.BorderSizePixel = 0
-	line.ZIndex = 40
-	line.Visible = false
-	line.Parent = gui
-	corner(line, 2)
-	self._dropLine = line
+	self:_buildPalette(gui)
+	self:_buildRight(gui)
+	self:_buildControls(gui)
 end
 
-function VABController:_buildPalette(root)
-	local pane = panel(root, UDim2.fromOffset(0, 46), UDim2.fromOffset(250, 408), "PARTS  (drag onto rocket)")
+function VABController:_buildPalette(gui)
+	local pane = panel(gui, UDim2.fromOffset(16, 56), UDim2.fromOffset(248, 470), "PARTS  (click to grab)")
 
 	local tabs = Instance.new("Frame")
 	tabs.Position = UDim2.fromOffset(12, 38)
@@ -262,56 +240,21 @@ function VABController:_addPartCard(def, id)
 	hint.TextSize = 11
 	hint.TextXAlignment = Enum.TextXAlignment.Left
 	hint.TextColor3 = DIM
-	hint.Text = "drag to add"
+	hint.Text = "click, then place on rocket"
 	hint.Parent = b
 
-	b.InputBegan:Connect(function(input)
-		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-			self:_startDrag(id, input.Position)
-		end
+	b.Activated:Connect(function()
+		self:_grab(id)
 	end)
 	table.insert(self._partCards, b)
 end
 
-function VABController:_buildCanvas(root)
-	local pane = panel(root, UDim2.fromOffset(262, 46), UDim2.fromOffset(360, 408), "ROCKET  (bottom -> top)")
-	local scroller = Instance.new("ScrollingFrame")
-	scroller.Position = UDim2.fromOffset(10, 38)
-	scroller.Size = UDim2.new(1, -20, 1, -50)
-	scroller.BackgroundTransparency = 1
-	scroller.BorderSizePixel = 0
-	scroller.ScrollBarThickness = 5
-	scroller.CanvasSize = UDim2.new()
-	scroller.AutomaticCanvasSize = Enum.AutomaticSize.Y
-	scroller.Parent = pane
-	local list = Instance.new("UIListLayout")
-	list.Padding = UDim.new(0, 2)
-	list.HorizontalAlignment = Enum.HorizontalAlignment.Center
-	list.SortOrder = Enum.SortOrder.LayoutOrder
-	list.Parent = scroller
-	self._canvas = scroller
-
-	local hint = Instance.new("TextLabel")
-	hint.Name = "EmptyHint"
-	hint.AnchorPoint = Vector2.new(0.5, 0.5)
-	hint.Position = UDim2.fromScale(0.5, 0.5)
-	hint.Size = UDim2.new(1, -40, 0, 80)
-	hint.BackgroundTransparency = 1
-	hint.Font = Enum.Font.Gotham
-	hint.TextSize = 15
-	hint.TextWrapped = true
-	hint.TextColor3 = DIM
-	hint.Text = "Drag parts here from the left.\nStart with an engine (the anchor), then add tanks and a pod on top."
-	hint.Parent = pane
-	self._emptyHint = hint
-end
-
-function VABController:_buildRight(root)
-	local pane = panel(root, UDim2.fromOffset(634, 46), UDim2.fromOffset(314, 408), "PART")
+function VABController:_buildRight(gui)
+	local pane = panel(gui, UDim2.new(1, -330, 0, 56), UDim2.fromOffset(314, 470), "PART")
 
 	self._partLabel = Instance.new("TextLabel")
 	self._partLabel.Position = UDim2.fromOffset(14, 40)
-	self._partLabel.Size = UDim2.new(1, -28, 0, 150)
+	self._partLabel.Size = UDim2.new(1, -28, 0, 160)
 	self._partLabel.BackgroundTransparency = 1
 	self._partLabel.Font = Enum.Font.Code
 	self._partLabel.TextSize = 14
@@ -322,7 +265,7 @@ function VABController:_buildRight(root)
 	self._partLabel.Parent = pane
 
 	self._removeBtn = Instance.new("TextButton")
-	self._removeBtn.Position = UDim2.fromOffset(14, 196)
+	self._removeBtn.Position = UDim2.fromOffset(14, 206)
 	self._removeBtn.Size = UDim2.new(1, -28, 0, 32)
 	self._removeBtn.BackgroundColor3 = Color3.fromRGB(120, 60, 60)
 	self._removeBtn.BorderSizePixel = 0
@@ -340,15 +283,8 @@ function VABController:_buildRight(root)
 		end
 	end)
 
-	local div = Instance.new("Frame")
-	div.Position = UDim2.fromOffset(14, 240)
-	div.Size = UDim2.new(1, -28, 0, 1)
-	div.BackgroundColor3 = Color3.fromRGB(60, 66, 80)
-	div.BorderSizePixel = 0
-	div.Parent = pane
-
 	local craftTitle = Instance.new("TextLabel")
-	craftTitle.Position = UDim2.fromOffset(14, 250)
+	craftTitle.Position = UDim2.fromOffset(14, 252)
 	craftTitle.Size = UDim2.new(1, -28, 0, 18)
 	craftTitle.BackgroundTransparency = 1
 	craftTitle.Font = Enum.Font.GothamBold
@@ -359,8 +295,8 @@ function VABController:_buildRight(root)
 	craftTitle.Parent = pane
 
 	self._craftLabel = Instance.new("TextLabel")
-	self._craftLabel.Position = UDim2.fromOffset(14, 272)
-	self._craftLabel.Size = UDim2.new(1, -28, 1, -284)
+	self._craftLabel.Position = UDim2.fromOffset(14, 274)
+	self._craftLabel.Size = UDim2.new(1, -28, 1, -286)
 	self._craftLabel.BackgroundTransparency = 1
 	self._craftLabel.Font = Enum.Font.Code
 	self._craftLabel.TextSize = 14
@@ -371,18 +307,18 @@ function VABController:_buildRight(root)
 	self._craftLabel.Parent = pane
 end
 
-function VABController:_buildControls(root)
+function VABController:_buildControls(gui)
 	local launch = Instance.new("TextButton")
-	launch.AnchorPoint = Vector2.new(0, 1)
-	launch.Position = UDim2.new(0, 0, 1, 0)
-	launch.Size = UDim2.fromOffset(330, 56)
+	launch.AnchorPoint = Vector2.new(0.5, 1)
+	launch.Position = UDim2.new(0.5, -90, 1, -16)
+	launch.Size = UDim2.fromOffset(220, 50)
 	launch.BackgroundColor3 = Color3.fromRGB(60, 170, 90)
 	launch.BorderSizePixel = 0
 	launch.Font = Enum.Font.GothamBold
-	launch.TextSize = 22
+	launch.TextSize = 20
 	launch.TextColor3 = Color3.fromRGB(255, 255, 255)
 	launch.Text = "LAUNCH"
-	launch.Parent = root
+	launch.Parent = gui
 	corner(launch, 10)
 	self._launchBtn = launch
 	launch.Activated:Connect(function()
@@ -390,85 +326,216 @@ function VABController:_buildControls(root)
 	end)
 
 	local clear = Instance.new("TextButton")
-	clear.AnchorPoint = Vector2.new(0, 1)
-	clear.Position = UDim2.new(0, 344, 1, 0)
-	clear.Size = UDim2.fromOffset(150, 56)
+	clear.AnchorPoint = Vector2.new(0.5, 1)
+	clear.Position = UDim2.new(0.5, 100, 1, -16)
+	clear.Size = UDim2.fromOffset(130, 50)
 	clear.BackgroundColor3 = Color3.fromRGB(120, 60, 60)
 	clear.BorderSizePixel = 0
 	clear.Font = Enum.Font.GothamBold
 	clear.TextSize = 16
 	clear.TextColor3 = Color3.fromRGB(255, 255, 255)
 	clear.Text = "CLEAR"
-	clear.Parent = root
+	clear.Parent = gui
 	corner(clear, 10)
 	clear.Activated:Connect(function()
 		self._selected = nil
 		self._vehicle:Clear()
 	end)
+
+	local hint = Instance.new("TextLabel")
+	hint.AnchorPoint = Vector2.new(0.5, 1)
+	hint.Position = UDim2.new(0.5, 0, 1, -72)
+	hint.Size = UDim2.fromOffset(720, 20)
+	hint.BackgroundTransparency = 1
+	hint.Font = Enum.Font.Code
+	hint.TextSize = 13
+	hint.TextColor3 = DIM
+	hint.Text = "Click a part, move onto the rocket, click to place  •  click a part to inspect  •  Esc cancels  •  RMB orbit / wheel zoom"
+	hint.Parent = gui
 end
 
--- ------------------------------------------------------------- assembly ----
+-- ------------------------------------------------------------- 3D build ----
 
-function VABController:_blockSize(def)
-	local h = math.max(def.height or 0, 1.7) * PX_PER_STUD
-	local w = math.clamp((def.radius or 3) * 16, 34, 300)
-	return w, h
+function VABController:_makeNodeIndicator()
+	local n = Instance.new("Part")
+	n.Name = "VABNode"
+	n.Shape = Enum.PartType.Ball
+	n.Anchored = true
+	n.CanCollide = false
+	n.CanQuery = false
+	n.CanTouch = false
+	n.CastShadow = false
+	n.Material = Enum.Material.Neon
+	n.Color = ACCENT
+	n.Size = Vector3.new(2, 2, 2)
+	n.Transparency = 1
+	n.Parent = Workspace
+	self._node = n
 end
+
+function VABController:_buildBase()
+	return self._origin:ToRender(self._flight:GetLaunchPosition())
+end
+
+function VABController:_grab(id)
+	self:_endPlacing()
+	local def = Catalog.get(id)
+	if not def then
+		return
+	end
+	local ghost = Instance.new("Part")
+	ghost.Name = "VABGhost"
+	ghost.Anchored = true
+	ghost.CanCollide = false
+	ghost.CanQuery = false
+	ghost.CanTouch = false
+	ghost.CastShadow = false
+	ghost.Material = Enum.Material.ForceField
+	ghost.Color = def.color
+	ghost.Transparency = 0.35
+	local gh
+	if def.shape == "pod" then
+		ghost.Shape = Enum.PartType.Ball
+		ghost.Size = Vector3.new(def.radius * 1.9, def.radius * 1.5, def.radius * 1.9)
+		gh = def.radius * 1.5
+	else
+		ghost.Shape = Enum.PartType.Cylinder
+		gh = math.max(def.height or 0, 1.6)
+		ghost.Size = Vector3.new(gh, def.radius * 2, def.radius * 2)
+	end
+	ghost.Parent = Workspace
+	self._placing = { id = id, def = def, ghost = ghost, gh = gh, pod = (def.shape == "pod") }
+	self._snapIndex = nil
+end
+
+function VABController:_endPlacing()
+	if self._placing then
+		self._placing.ghost:Destroy()
+		self._placing = nil
+	end
+	self._snapIndex = nil
+	if self._node then
+		self._node.Transparency = 1
+	end
+end
+
+-- Where along the build axis (height above the base) the mouse points, via a vertical
+-- plane through the rocket facing the camera.
+function VABController:_mouseHeight(base)
+	local cam = Workspace.CurrentCamera
+	local m = UserInputService:GetMouseLocation()
+	local ray = cam:ViewportPointToRay(m.X, m.Y)
+	local toCam = cam.CFrame.Position - base
+	local n = Vector3.new(toCam.X, 0, toCam.Z)
+	n = (n.Magnitude > 1e-3) and n.Unit or Vector3.zAxis
+	local denom = ray.Direction:Dot(n)
+	if math.abs(denom) < 1e-4 then
+		return 0
+	end
+	local t = (base - ray.Origin):Dot(n) / denom
+	local pt = ray.Origin + ray.Direction * t
+	return pt.Y - base.Y
+end
+
+function VABController:_updateGhost()
+	local base = self:_buildBase()
+	local design = self._vehicle:GetDesign()
+	local n = #design
+
+	-- Cumulative node heights (0 = bottom, n = top).
+	local cum = { [0] = 0 }
+	for i = 1, n do
+		cum[i] = cum[i - 1] + (design[i].height or 0)
+	end
+
+	local h = self:_mouseHeight(base)
+	local total = cum[n]
+	h = math.clamp(h, 0, total)
+
+	-- Snap to nearest node.
+	local bestK, bestD = 0, math.huge
+	for k = 0, n do
+		local d = math.abs(h - cum[k])
+		if d < bestD then
+			bestD = d
+			bestK = k
+		end
+	end
+	self._snapIndex = bestK + 1
+
+	local p = self._placing
+	local cy = cum[bestK] + p.gh * 0.5
+	local pos = base + Vector3.new(0, cy, 0)
+	if p.pod then
+		p.ghost.CFrame = CFrame.new(pos)
+	else
+		p.ghost.CFrame = CFrame.new(pos) * CFrame.Angles(0, 0, math.rad(90))
+	end
+
+	self._node.CFrame = CFrame.new(base + Vector3.new(0, cum[bestK], 0))
+	self._node.Transparency = 0.2
+end
+
+function VABController:_place()
+	local p = self._placing
+	if not p then
+		return
+	end
+	local idx = self._snapIndex or (#self._vehicle:GetDesign() + 1)
+	self:_endPlacing()
+	self._selected = idx
+	self._vehicle:InsertPart(idx, p.id)
+end
+
+function VABController:_trySelect()
+	local cam = Workspace.CurrentCamera
+	local craft = Workspace:FindFirstChild("Craft")
+	if not cam or not craft then
+		return
+	end
+	local m = UserInputService:GetMouseLocation()
+	local ray = cam:ViewportPointToRay(m.X, m.Y)
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Include
+	params.FilterDescendantsInstances = { craft }
+	local result = Workspace:Raycast(ray.Origin, ray.Direction * 8000, params)
+	if result and result.Instance then
+		local idx = result.Instance:GetAttribute("idx")
+		if idx then
+			self._selected = idx
+			self:_updatePartPanel()
+		end
+	end
+end
+
+function VABController:_onInput(input, gameProcessed)
+	if self._mode:GetMode() ~= "VAB" then
+		return
+	end
+	if input.UserInputType == Enum.UserInputType.MouseButton1 then
+		if gameProcessed then
+			return -- click landed on the UI
+		end
+		if self._placing then
+			self:_place()
+		else
+			self:_trySelect()
+		end
+	elseif input.KeyCode == Enum.KeyCode.Escape then
+		self:_endPlacing()
+	end
+end
+
+-- ------------------------------------------------------------- panels ----
 
 function VABController:_refresh()
 	local design = self._vehicle:GetDesign()
-	local stats = self._vehicle:GetStats()
-	local n = #design
-
 	if self._selected and not design[self._selected] then
 		self._selected = nil
 	end
-	self._emptyHint.Visible = (n == 0)
-
-	for _, b in ipairs(self._blocks) do
-		b.frame:Destroy()
-	end
-	self._blocks = {}
-
-	for index = 1, n do
-		local def = design[index]
-		local w, h = self:_blockSize(def)
-		local block = Instance.new("TextButton")
-		block.Size = UDim2.fromOffset(w, h)
-		block.BackgroundColor3 = def.color
-		block.AutoButtonColor = false
-		block.BorderSizePixel = 0
-		block.Text = ""
-		block.LayoutOrder = n - index -- index 1 (bottom) sorts last -> bottom of the list
-		block.Parent = self._canvas
-		corner(block, 5)
-
-		local lbl = Instance.new("TextLabel")
-		lbl.Size = UDim2.fromScale(1, 1)
-		lbl.BackgroundTransparency = 1
-		lbl.Font = Enum.Font.GothamBold
-		lbl.TextSize = 12
-		lbl.TextColor3 = Color3.fromRGB(20, 22, 28)
-		lbl.TextStrokeTransparency = 0.6
-		lbl.Text = def.name
-		lbl.Parent = block
-
-		local stroke = Instance.new("UIStroke")
-		stroke.Thickness = 2
-		stroke.Color = ACCENT
-		stroke.Enabled = (index == self._selected)
-		stroke.Parent = block
-
-		local thisIndex = index
-		block.Activated:Connect(function()
-			self:_select(thisIndex)
-		end)
-		table.insert(self._blocks, { index = index, frame = block, stroke = stroke })
-	end
-
 	self:_updatePartPanel()
 
-	-- Craft summary.
+	local stats = self._vehicle:GetStats()
 	local prof = self._vehicle:GetRotProfile()
 	local lines = {}
 	lines[#lines + 1] = string.format("dV total   %.0f", stats.totalDeltaV)
@@ -476,8 +543,7 @@ function VABController:_refresh()
 	lines[#lines + 1] = string.format("Launch TWR %.2f", stats.launchTWR)
 	lines[#lines + 1] = string.format("Stages     %d", stats.stageCount)
 	if prof.mass > 0 then
-		local stable = prof.margin > 0
-		lines[#lines + 1] = "Stability  " .. (stable and "STABLE" or "UNSTABLE")
+		lines[#lines + 1] = "Stability  " .. (prof.margin > 0 and "STABLE" or "UNSTABLE")
 	end
 	if stats.stageCount == 0 then
 		lines[#lines + 1] = ""
@@ -492,19 +558,11 @@ function VABController:_refresh()
 	self._launchBtn.AutoButtonColor = ready
 end
 
-function VABController:_select(index)
-	self._selected = index
-	for _, b in ipairs(self._blocks) do
-		b.stroke.Enabled = (b.index == index)
-	end
-	self:_updatePartPanel()
-end
-
 function VABController:_updatePartPanel()
 	local design = self._vehicle:GetDesign()
 	local def = self._selected and design[self._selected]
 	if not def then
-		self._partLabel.Text = "Click a part to inspect it."
+		self._partLabel.Text = "Click a part on the rocket\nto inspect it."
 		self._partLabel.TextColor3 = DIM
 		self._removeBtn.Visible = false
 		return
@@ -525,113 +583,6 @@ function VABController:_updatePartPanel()
 		lines[#lines + 1] = string.format("exhaust v %d", def.exhaustVelocity or 0)
 	end
 	self._partLabel.Text = table.concat(lines, "\n")
-end
-
--- ----------------------------------------------------------------- drag ----
-
-function VABController:_startDrag(id, pos)
-	self:_cancelDrag()
-	local def = Catalog.get(id)
-	if not def then
-		return
-	end
-	local ghost = Instance.new("Frame")
-	ghost.AnchorPoint = Vector2.new(0.5, 0.5)
-	ghost.Size = UDim2.fromOffset(130, 30)
-	ghost.BackgroundColor3 = def.color
-	ghost.BackgroundTransparency = 0.2
-	ghost.BorderSizePixel = 0
-	ghost.ZIndex = 50
-	ghost.Position = UDim2.fromOffset(pos.X, pos.Y)
-	ghost.Parent = self._gui
-	corner(ghost, 6)
-	local lbl = Instance.new("TextLabel")
-	lbl.Size = UDim2.fromScale(1, 1)
-	lbl.BackgroundTransparency = 1
-	lbl.Font = Enum.Font.GothamBold
-	lbl.TextSize = 13
-	lbl.TextColor3 = Color3.fromRGB(20, 22, 28)
-	lbl.ZIndex = 51
-	lbl.Text = def.name
-	lbl.Parent = ghost
-
-	self._drag = { id = id, ghost = ghost }
-	self._dropIndex = nil
-end
-
-function VABController:_cancelDrag()
-	if self._drag then
-		self._drag.ghost:Destroy()
-		self._drag = nil
-	end
-	self._dropIndex = nil
-	if self._dropLine then
-		self._dropLine.Visible = false
-	end
-end
-
-local function over(frame, x, y)
-	local ap, as = frame.AbsolutePosition, frame.AbsoluteSize
-	return x >= ap.X and x <= ap.X + as.X and y >= ap.Y and y <= ap.Y + as.Y
-end
-
-function VABController:_computeDrop(mouseY)
-	local n = #self._vehicle:GetDesign()
-	if n == 0 then
-		return 1
-	end
-	local list = table.clone(self._blocks)
-	table.sort(list, function(a, b)
-		return a.frame.AbsolutePosition.Y < b.frame.AbsolutePosition.Y
-	end)
-	local slot = 0
-	for _, b in ipairs(list) do
-		local mid = b.frame.AbsolutePosition.Y + b.frame.AbsoluteSize.Y * 0.5
-		if mouseY > mid then
-			slot += 1
-		else
-			break
-		end
-	end
-	return math.clamp(n + 1 - slot, 1, n + 1)
-end
-
-function VABController:_onInputChanged(input)
-	if not self._drag then
-		return
-	end
-	if input.UserInputType ~= Enum.UserInputType.MouseMovement and input.UserInputType ~= Enum.UserInputType.Touch then
-		return
-	end
-	local pos = input.Position
-	self._drag.ghost.Position = UDim2.fromOffset(pos.X, pos.Y)
-
-	if over(self._canvas, pos.X, pos.Y) then
-		self._dropIndex = self:_computeDrop(pos.Y)
-		local ap, as = self._canvas.AbsolutePosition, self._canvas.AbsoluteSize
-		self._dropLine.Visible = true
-		self._dropLine.Position = UDim2.fromOffset(ap.X + 8, pos.Y - 1)
-		self._dropLine.Size = UDim2.fromOffset(as.X - 16, 3)
-	else
-		self._dropIndex = nil
-		self._dropLine.Visible = false
-	end
-end
-
-function VABController:_onInputEnded(input)
-	if not self._drag then
-		return
-	end
-	if input.UserInputType ~= Enum.UserInputType.MouseButton1 and input.UserInputType ~= Enum.UserInputType.Touch then
-		return
-	end
-	local id = self._drag.id
-	local dropIndex = self._dropIndex
-	self:_cancelDrag()
-	if dropIndex then
-		self._selected = dropIndex
-		self._vehicle:InsertPart(dropIndex, id)
-	end
 end
 
 return VABController

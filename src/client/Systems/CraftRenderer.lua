@@ -149,20 +149,23 @@ function CraftRenderer:_buildPad()
 	})
 end
 
-function CraftRenderer:_buildFins(model, y, radius, stage)
+function CraftRenderer:_buildFins(model, y, radius, stage, index)
 	local count, span, finH, thick = 4, 3.4, 4.2, 0.4
 	for i = 1, count do
 		local ang = (i - 1) * (2 * math.pi / count)
 		local dir = Vector3.new(math.cos(ang), 0, math.sin(ang))
 		local pos = dir * (radius + span * 0.5 - 0.6) + Vector3.new(0, y, 0)
-		makePart(model, "Fin" .. i, {
+		local blade = makePart(model, "Fin" .. i, {
 			Shape = Enum.PartType.Block,
 			-- X = radial span, Y = vertical, Z = thickness (tangential).
 			Size = Vector3.new(span, finH, thick),
 			Color = Color3.fromRGB(150, 80, 70),
 			Material = Enum.Material.Metal,
 			CFrame = CFrame.fromMatrix(pos, dir, Vector3.yAxis),
-		}):SetAttribute("stg", stage)
+		})
+		blade:SetAttribute("stg", stage)
+		blade:SetAttribute("idx", index)
+		blade.CanQuery = true
 	end
 end
 
@@ -180,10 +183,18 @@ function CraftRenderer:_rebuildCraft()
 	local y = 0
 	local bottomRadius = 3
 	local bottomSet = false
+	-- Tag each part with its stage AND design index, and make it queryable so the VAB
+	-- can raycast-select it in 3D.
+	local function tag(part, stage, index)
+		part:SetAttribute("stg", stage)
+		part:SetAttribute("idx", index)
+		part.CanQuery = true
+		return part
+	end
 	for _, entry in ipairs(layout) do
-		local def, stage = entry.def, entry.stage
+		local def, stage, index = entry.def, entry.stage, entry.index
 		if def.shape == "fins" then
-			self:_buildFins(model, y, bottomSet and bottomRadius or def.radius, stage)
+			self:_buildFins(model, y, bottomSet and bottomRadius or def.radius, stage, index)
 		else
 			if not bottomSet then
 				bottomRadius = def.radius
@@ -191,17 +202,17 @@ function CraftRenderer:_rebuildCraft()
 			end
 			local mat = (def.category == "engine") and Enum.Material.Metal or Enum.Material.SmoothPlastic
 			local center = y + def.height / 2
-			addCylinder(model, def.name, def.height, def.radius, def.color, mat, center):SetAttribute("stg", stage)
+			tag(addCylinder(model, def.name, def.height, def.radius, def.color, mat, center), stage, index)
 			if def.shape == "pod" then
-				makePart(model, "Dome", {
+				tag(makePart(model, "Dome", {
 					Shape = Enum.PartType.Ball,
 					Size = Vector3.new(def.radius * 1.8, def.radius * 1.4, def.radius * 1.8),
 					Color = def.color,
 					Material = Enum.Material.SmoothPlastic,
 					CFrame = CFrame.new(0, y + def.height, 0),
-				}):SetAttribute("stg", stage)
+				}), stage, index)
 			elseif def.shape == "engine" then
-				addCylinder(model, "Nozzle", def.height * 0.5, def.radius * 0.66, Color3.fromRGB(40, 42, 48), Enum.Material.Metal, y - def.height * 0.1):SetAttribute("stg", stage)
+				tag(addCylinder(model, "Nozzle", def.height * 0.5, def.radius * 0.66, Color3.fromRGB(40, 42, 48), Enum.Material.Metal, y - def.height * 0.1), stage, index)
 			end
 			y += def.height
 		end
