@@ -17,24 +17,47 @@ Config.BODY = {
 	seed = 1337,
 	grassColor = Color3.fromRGB(86, 140, 74),
 	hillColor = Color3.fromRGB(74, 124, 66),
+	lodColor = Color3.fromRGB(66, 104, 116), -- distant body tint (ocean + land blend)
 }
 
--- Render-distance terrain. The planet's surface is a single deterministic
--- Perlin heightfield (see Shared.Planet); it is NOT generated on the fly. Real
--- Roblox terrain is laid in fixed world-space chunks that load when within
--- renderDistance of the craft and unload when beyond it - loaded chunks are
--- never re-laid. Beyond the terrain, the grass Ball is the low-detail LOD.
+-- Render-distance terrain. The planet's surface is a single deterministic Perlin
+-- biome+heightfield (see Shared.Planet); it is NOT generated on the fly. Real Roblox
+-- terrain is laid in fixed world-space chunks that load when within renderDistance of
+-- the craft and unload when beyond it. Each surface cell is a flat-topped COLUMN
+-- (FillBlock, oriented to the local up) rather than a ball -- Roblox's terrain
+-- smoothing rounds them into smooth ground, not bumpy spheres. Beyond the terrain,
+-- the mesh-sphere body is the low-detail LOD.
 Config.TERRAIN = {
 	chunkSize = 220, -- world-space cube edge of one terrain chunk
 	renderDistance = 640, -- terrain is shown within this many studs of the craft
-	spacing = 30, -- grid step between crust fill-balls inside a chunk
-	ballRadius = 26, -- fill-ball radius (overlaps neighbours into a shell)
-	reliefAmp = 18, -- +/- studs of Perlin relief on the surface
-	reliefFreq = 0.012, -- base Perlin frequency (smaller = broader hills)
+	spacing = 18, -- grid step between terrain columns inside a chunk
+	footprint = 26, -- column footprint (overlaps neighbours so there are no gaps)
+	crustThickness = 26, -- how deep each column fills below its surface
 	streamInAlt = 620, -- at/below this altitude terrain begins loading
-	streamOutAlt = 900, -- above this altitude all terrain unloads (Ball LOD only)
-	ballsPerYield = 40, -- fill-balls placed per frame while a chunk loads in
+	streamOutAlt = 900, -- above this altitude all terrain unloads (LOD only)
+	fillsPerYield = 60, -- terrain columns placed per frame while a chunk loads in
 	scanInterval = 0.15, -- seconds between render-distance rescans
+}
+
+-- Biomes. A low-frequency "elevation" Perlin field shapes continents/oceans and a
+-- separate "temperature" field splits the temperate land into plains/desert/cold.
+-- Plains are deliberately the widest band. Each biome sets its own surface height
+-- (mostly flat, mountains the exception) and Roblox material. Frequencies are tuned
+-- for medium biomes (~1-1.5k studs) so a landing usually shows one biome + a border.
+Config.BIOMES = {
+	elevFreq = 0.0008, -- continents/oceans (smaller = bigger biomes)
+	tempFreq = 0.0011, -- temperature split for land biomes
+	detailFreq = 0.02, -- fine within-biome relief
+	oceanLevel = -0.10, -- elevation below this is ocean (water at sea level)
+	mountainLevel = 0.40, -- normalised land-elevation above this is mountains
+	coldLevel = -0.22, -- temperature below this is cold (snow)
+	hotLevel = 0.22, -- temperature above this is desert (sand)
+	plainsAmp = 5, -- flat
+	desertAmp = 11, -- gentle dunes
+	coldAmp = 15, -- rolling snow
+	mountainAmp = 60, -- + ridged detail -> peaks
+	snowLine = 50, -- mountains above R+this are snow-capped
+	maxRelief = 110, -- worst-case |height - sea level| (streaming band/padding)
 }
 
 Config.FLIGHT = {

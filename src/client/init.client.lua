@@ -93,4 +93,4 @@ for _, name in ipairs(startOrder) do
 	end
 end
 
-print("[RocketSim] Client systems started -- build P9.3 (3D VAB: grab parts from UI, place on the rocket).")
+print("[RocketSim] Client systems started -- build P10.0 (smooth biome terrain: plains/ocean/mountain/desert/cold).")

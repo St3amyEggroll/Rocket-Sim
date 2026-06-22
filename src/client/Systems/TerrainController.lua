@@ -97,7 +97,7 @@ function TerrainController:_scan(state)
 		math.floor(ground.Y / CS),
 		math.floor(ground.Z / CS)
 	)
-	local shellBand = CS * 0.9 + T.reliefAmp
+	local shellBand = CS * 0.9 + Config.BIOMES.maxRelief
 	local renderSq = T.renderDistance * T.renderDistance
 	for dx = -range, range do
 		for dy = -range, range do
@@ -165,20 +165,19 @@ function TerrainController:_pump()
 	end)
 end
 
--- Lay the curved crust for one chunk. We sample the heightfield over the chunk's
--- footprint on the sphere but only fill surface points that physically fall inside
--- THIS cube (ownership), so every ball a chunk places is removed by its own unload
--- (no orphans) and every surface point is owned by exactly one chunk (no holes).
--- Balls near a face still bridge into the neighbour cube, so there are no seams.
+-- Lay one chunk's terrain. For each grid cell we sample the biome surface and fill a
+-- flat-topped COLUMN (an oriented FillBlock, top at the surface, crust deep, local up
+-- = the surface normal). Roblox's terrain smoothing rounds adjacent columns into a
+-- smooth surface (no visible spheres). We only fill cells whose surface point falls
+-- inside THIS cube (ownership) so each chunk cleans up exactly what it placed.
 function TerrainController:_fillChunk(center, gen)
 	local T = Config.TERRAIN
 	local terrain = Workspace.Terrain
 	local spacing = T.spacing
-	local ballR = T.ballRadius
+	local crust = T.crustThickness
 	local CS = T.chunkSize
 	local R = Planet.seaLevel()
 
-	-- This cube's integer cell (center = (cell + 0.5) * CS).
 	local ox = math.floor(center.X / CS)
 	local oy = math.floor(center.Y / CS)
 	local oz = math.floor(center.Z / CS)
@@ -188,25 +187,25 @@ function TerrainController:_fillChunk(center, gen)
 	local t1 = d:Cross(ref).Unit
 	local t2 = d:Cross(t1).Unit
 
-	local half = CS * 0.8 -- sample a bit past the cube footprint so corners are covered
+	local boxSize = Vector3.new(T.footprint, crust, T.footprint)
+	local half = CS * 0.8 -- sample a little past the cube so corners are covered
 	local placed = 0
 	for u = -half, half, spacing do
 		for v = -half, half, spacing do
 			local sd = (d * R + t1 * u + t2 * v).Unit
-			local h = Planet.radiusForUnit(sd.X, sd.Y, sd.Z)
-			local p = sd * h -- the surface point
-			-- Only this chunk's own cells (the cube containing p).
+			local h, material = Planet.sample(sd.X, sd.Y, sd.Z)
+			local p = sd * h -- surface point (oceans sit at sea level)
 			if math.floor(p.X / CS) == ox and math.floor(p.Y / CS) == oy and math.floor(p.Z / CS) == oz then
-				-- Centre the fill-ball one radius below the surface so its top sits at h
-				-- (matching where the craft lands) with the crust's thickness below it.
-				terrain:FillBall(sd * (h - ballR), ballR, GRASS)
+				-- Oriented column: up = surface normal (sd), top at h, crust deep.
+				local up = sd
+				local rt = up:Cross(ref)
+				rt = (rt.Magnitude > 1e-3) and rt.Unit or up:Cross(Vector3.xAxis).Unit
+				terrain:FillBlock(CFrame.fromMatrix(sd * (h - crust * 0.5), rt, up), boxSize, material)
 				placed += 1
-				if placed % T.ballsPerYield == 0 then
+				if placed % T.fillsPerYield == 0 then
 					task.wait()
-					-- A full clear (e.g. flew above streamOutAlt) happened mid-fill:
-					-- abort so we do not lay orphan terrain over a cleared world.
 					if self._gen ~= gen then
-						return false
+						return false -- a full clear happened mid-fill; abort
 					end
 				end
 			end
@@ -219,7 +218,7 @@ end
 -- across the faces are removed too (prevents orphan terrain being left behind).
 function TerrainController:_unloadChunk(center)
 	local T = Config.TERRAIN
-	local pad = T.ballRadius * 2 + T.spacing
+	local pad = T.footprint + T.crustThickness + T.spacing
 	local size = Vector3.new(T.chunkSize + pad, T.chunkSize + pad, T.chunkSize + pad)
 	Workspace.Terrain:FillBlock(CFrame.new(center), size, AIR)
 end

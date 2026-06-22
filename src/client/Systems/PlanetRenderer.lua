@@ -72,7 +72,7 @@ function PlanetRenderer:Start()
 	self._origin = Registry:Get("FloatingOriginController")
 	self._input = Registry:Get("InputController")
 
-	self._ball, self._ballMesh = self:_makeSphere("Planet", Config.BODY.grassColor, Enum.Material.Grass, 0)
+	self._ball, self._ballMesh = self:_makeSphere("Planet", Config.BODY.lodColor or Config.BODY.grassColor, Enum.Material.SmoothPlastic, 0)
 	-- Translucent atmosphere shell (purely cosmetic), drawn concentric with the body.
 	self._atmo, self._atmoMesh = self:_makeSphere("Atmosphere", Config.ATMOSPHERE.color, Enum.Material.ForceField, 0.55)
 
