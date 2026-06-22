@@ -28,6 +28,7 @@ local initOrder = {
 	"CameraController",
 	"PlanetRenderer",
 	"CraftRenderer",
+	"SkyController",
 	"CrewController",
 	"MapViewController",
 	"NavballController",
@@ -50,6 +51,7 @@ local startOrder = {
 	"CameraController",
 	"PlanetRenderer",
 	"CraftRenderer",
+	"SkyController",
 	"CrewController",
 	"MapViewController",
 	"NavballController",
@@ -91,4 +93,4 @@ for _, name in ipairs(startOrder) do
 	end
 end
 
-print("[RocketSim] Client systems started -- build P8.3 (decouplers: spent stages drop away and stay).")
+print("[RocketSim] Client systems started -- build P9.0 (15k planet, Sun + Moon, space<->atmosphere sky).")

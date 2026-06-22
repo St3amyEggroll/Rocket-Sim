@@ -32,17 +32,20 @@ local Planet = require(Shared:WaitForChild("Planet"))
 
 local PlanetRenderer = {}
 
--- Part collision-box size for the mesh spheres: big enough never to be distance-
--- culled (even out at maxRender), small enough to stay under the 2048 part cap. The
--- visible size is driven entirely by mesh.Scale = renderedDiameter / BASE.
-local BASE = 1000
+-- Part collision-box size for the mesh spheres: as large as the part cap allows, so
+-- the body resists distance-culling out to low orbit. The visible size is driven
+-- entirely by mesh.Scale = renderedDiameter / BASE.
+local BASE = 2048
 
 function PlanetRenderer:Init()
 	self._trueRadius = Planet.lodRadius()
 	self._atmoRadius = Config.BODY.radius + Config.ATMOSPHERE.top
-	-- Comfortably inside Roblox's render range, and beyond the camera's max zoom
-	-- so the planet always sorts behind the (nearby) craft.
-	self._maxRender = math.max(12000, Config.CAMERA.distanceMax * 1.3)
+	-- Within maxRender the body is drawn at TRUE scale/position (mesh spheres have no
+	-- size cap), so the surface and low orbit are seamless and never occlude the craft.
+	-- Beyond it (high orbit / deep space, where pulling it in can't occlude anything)
+	-- the angular-size proxy keeps it on screen. The threshold sits just above the
+	-- surface + max zoom so the close view is always true-scale.
+	self._maxRender = Config.BODY.radius + Config.CAMERA.distanceMax + 4000
 end
 
 function PlanetRenderer:_makeSphere(name, color, material, transparency)

@@ -111,9 +111,12 @@ the craft `LANDED`s; `3` (RadialOut) + Shift to lift off again.
   numerically and time warp is pinned to 1x; above it, coasting is back on rails.
   Bigger planet (6000 studs) drawn as a scaled mesh sphere; KSP-style VAB + a
   revert / back-to-launch menu and crash overlay.
-- **Phase 8 (done):** rigid-body attitude. The craft has angular velocity + moment
-  of inertia; control torque (weak reaction wheels + engine gimbal) and AERODYNAMIC
-  torque (drag at the centre of pressure vs centre of mass) spin it -- so stable
-  rockets weathervane prograde and unstable ones flip. Fins move the CoP back; the
-  VAB shows a CoM/CoP stability margin.
-- **Next:** second body (moon), sphere-of-influence transitions, maneuver nodes.
+- **Phase 8 (done):** rigid-body attitude (angular velocity + inertia, reaction-wheel
+  + gimbal control, aerodynamic weathervaning/flipping, fins, VAB stability margin);
+  decouplers that drop spent stages as free-falling debris; whole-body terrain
+  collision that explodes the craft above the crash speed.
+- **Phase 9 (done):** a 15,000-stud planet, a Sun and a Moon (Roblox celestial
+  bodies + stars), and an altitude-blended sky -- blue Earth-like atmosphere near
+  the ground easing into a dark, starry space sky as you climb.
+- **Next:** make the Moon a real destination (its own gravity / sphere-of-influence
+  + surface), and maneuver nodes.

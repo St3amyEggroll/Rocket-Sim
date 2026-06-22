@@ -60,7 +60,6 @@ function CraftRenderer:Start()
 	local Flight = Registry:Get("FlightController")
 
 	self:_cleanupWorld()
-	self:_setupLighting()
 	self:_buildPad()
 	self:_rebuildCraft()
 
@@ -136,18 +135,6 @@ function CraftRenderer:_cleanupWorld()
 			inst:Destroy()
 		end
 	end
-end
-
-function CraftRenderer:_setupLighting()
-	Lighting.ClockTime = 14
-	Lighting.GeographicLatitude = 25
-	Lighting.Brightness = 2.5
-	Lighting.Ambient = Color3.fromRGB(80, 84, 96)
-	Lighting.OutdoorAmbient = Color3.fromRGB(150, 152, 160)
-	Lighting.GlobalShadows = true
-	Lighting.EnvironmentDiffuseScale = 0.5
-	Lighting.EnvironmentSpecularScale = 0.4
-	Lighting.FogEnd = 1e9
 end
 
 function CraftRenderer:_buildPad()

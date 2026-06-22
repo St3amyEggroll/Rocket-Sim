@@ -12,8 +12,8 @@ local Config = {}
 
 Config.BODY = {
 	name = "Terra",
-	radius = 3000, -- 6000 studs across; drawn as a scaled mesh sphere (PlanetRenderer)
-	mu = 1.35e8, -- surface gravity ~15 studs/s^2 (g = mu / radius^2)
+	radius = 15000, -- drawn as a scaled mesh sphere (PlanetRenderer)
+	mu = 3.375e9, -- surface gravity ~15 studs/s^2 (g = mu / radius^2)
 	seed = 1337,
 	grassColor = Color3.fromRGB(86, 140, 74),
 	hillColor = Color3.fromRGB(74, 124, 66),
@@ -48,13 +48,32 @@ Config.FLIGHT = {
 -- pinned to 1x, exactly like KSP. Above ATMOSPHERE.top the air is gone and coasting
 -- is back on analytic rails.
 Config.ATMOSPHERE = {
-	top = 600, -- studs above sea level where the air becomes negligible
-	scaleHeight = 130, -- air density e-folds (1/e) over this many studs of altitude
-	dragCoeff = 0.008, -- drag accel = dragCoeff * densityFrac * speed^2 * dragArea / mass
-	reentryQ = 1800, -- densityFrac*speed^2 above this begins reentry heating FX
-	maxReentryQ = 9000, -- ...and it saturates here
+	top = 2500, -- studs above sea level where the air becomes negligible
+	scaleHeight = 520, -- air density e-folds (1/e) over this many studs of altitude
+	dragCoeff = 0.004, -- drag accel = dragCoeff * densityFrac * speed^2 * dragArea / mass
+	reentryQ = 8000, -- densityFrac*speed^2 above this begins reentry heating FX
+	maxReentryQ = 40000, -- ...and it saturates here
 	momentScale = 1.4, -- multiplier on aerodynamic torque (flip aggressiveness)
 	color = Color3.fromRGB(120, 170, 255), -- atmosphere haze tint
+}
+
+-- Sky. The world transitions from a bright blue Earth-like sky in the atmosphere to
+-- a dark, starry space sky as you climb, blended by altitude (SkyController). The Sun
+-- and Moon are Roblox's native celestial bodies (with procedural stars), so they
+-- always render no matter how far the craft is from the world origin.
+Config.SKY = {
+	starCount = 3200,
+	blendStartAlt = 300, -- at/below this altitude the sky is fully atmospheric (blue)
+	blendEndAlt = 2800, -- at/above this altitude the sky is fully space (dark + stars)
+	dayClockTime = 14, -- atmosphere: midday sun, blue sky
+	spaceClockTime = 22.5, -- space: night side, stars out
+	groundBrightness = 2.6,
+	spaceBrightness = 1.8,
+	groundAmbient = Color3.fromRGB(80, 84, 96),
+	spaceAmbient = Color3.fromRGB(30, 32, 42), -- not pitch black, so the craft stays visible
+	groundOutdoor = Color3.fromRGB(150, 152, 160),
+	spaceOutdoor = Color3.fromRGB(44, 46, 58),
+	atmoDensity = 0.32, -- Atmosphere instance density at sea level
 }
 
 Config.CRAFT = {
