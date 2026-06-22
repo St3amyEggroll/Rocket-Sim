@@ -166,6 +166,10 @@ end
 function InputController:GetTimeWarp()
 	return self._warpLevels[self._warpIndex]
 end
+-- Force warp back to 1x (flight pins this inside the atmosphere / under thrust).
+function InputController:ResetWarp()
+	self._warpIndex = 1
+end
 function InputController:GetMapMode()
 	return self._mapMode
 end

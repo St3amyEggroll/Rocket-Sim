@@ -214,17 +214,48 @@ function FlightController:_step(rawDt)
 	local nose = self._attitude.LookVector
 	local powered = false
 
+	-- Are we in air? (drag + reentry live here, and warp is pinned to 1x.)
+	local A = Config.ATMOSPHERE
+	local r0 = math.sqrt(pos.x * pos.x + pos.y * pos.y + pos.z * pos.z)
+	local inAtmo = (r0 - self._bodyRadius) < A.top
+	local effWarp = warp
+	local reentry = 0
+
 	if self._landed and throttle <= 0 then
 		self._status = "Landed"
 	else
-		local accelMag = self._vehicle:GetThrustAccel(throttle)
-		if throttle > 0 and accelMag > 0 then
-			local a = Orbit.vec(nose.X * accelMag, nose.Y * accelMag, nose.Z * accelMag)
-			self._state = Orbit.integrate(self._state, self._mu, dt, function()
-				return a
+		local thrustAccel = self._vehicle:GetThrustAccel(throttle)
+		powered = throttle > 0 and thrustAccel > 0
+
+		if powered or inAtmo then
+			-- Thrust and drag are not conic forces, so integrate numerically; this
+			-- path also can't be time-warped.
+			effWarp = 1
+			if inAtmo and warp > 1 then
+				self._input:ResetWarp()
+			end
+			local k = A.dragCoeff * self._vehicle:GetDragArea() / math.max(self._vehicle:GetCurrentMass(), 1e-3)
+			self._state = Orbit.integrate(self._state, self._mu, dt, function(p2, v2)
+				local ax, ay, az = 0, 0, 0
+				if powered then
+					ax, ay, az = nose.X * thrustAccel, nose.Y * thrustAccel, nose.Z * thrustAccel
+				end
+				local r2 = math.sqrt(p2.x * p2.x + p2.y * p2.y + p2.z * p2.z)
+				local alt2 = r2 - self._bodyRadius
+				if alt2 < A.top then
+					-- a_drag = -k * densityFrac * |v| * v  (opposes velocity)
+					local rho = math.exp(-math.max(alt2, 0) / A.scaleHeight)
+					local speed = math.sqrt(v2.x * v2.x + v2.y * v2.y + v2.z * v2.z)
+					local d = -k * rho * speed
+					ax += v2.x * d
+					ay += v2.y * d
+					az += v2.z * d
+				end
+				return Orbit.vec(ax, ay, az)
 			end)
-			self._vehicle:ConsumeFuel(dt, throttle)
-			powered = true
+			if powered then
+				self._vehicle:ConsumeFuel(dt, throttle)
+			end
 		else
 			self._state = Orbit.propagate(self._state, self._mu, dt * warp)
 		end
@@ -232,6 +263,16 @@ function FlightController:_step(rawDt)
 		self:_checkTouchdown(nose) -- sets _landed / _crashed / _tipping + status
 		if not self._landed then
 			self._status = powered and "Powered" or "Coasting"
+		end
+
+		-- Reentry heating intensity from dynamic pressure (densityFrac * speed^2).
+		if inAtmo and not self._landed then
+			local v = self._state.velocity
+			local p = self._state.position
+			local altNow = math.sqrt(p.x * p.x + p.y * p.y + p.z * p.z) - self._bodyRadius
+			local rho = math.exp(-math.max(altNow, 0) / A.scaleHeight)
+			local q = rho * (v.x * v.x + v.y * v.y + v.z * v.z)
+			reentry = math.clamp((q - A.reentryQ) / (A.maxReentryQ - A.reentryQ), 0, 1)
 		end
 	end
 
@@ -241,10 +282,12 @@ function FlightController:_step(rawDt)
 		pointDir = nose,
 		dt = dt,
 		throttle = throttle,
-		warp = warp,
+		warp = effWarp,
 		sas = sas,
 		powered = powered,
 		status = self._status,
+		inAtmo = inAtmo,
+		reentry = reentry,
 		tele = self._vehicle:GetTelemetry(throttle),
 	})
 end

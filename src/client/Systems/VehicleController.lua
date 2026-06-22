@@ -183,6 +183,15 @@ function VehicleController:HasLegs(): boolean
 	return false
 end
 
+-- Summed aerodynamic drag area of the active parts (used by the atmosphere model).
+function VehicleController:GetDragArea(): number
+	local a = 0
+	for _, def in ipairs(self:GetActiveParts()) do
+		a += def.drag or 0
+	end
+	return a
+end
+
 function VehicleController:GetTelemetry(throttle)
 	return {
 		mass = self:GetCurrentMass(),

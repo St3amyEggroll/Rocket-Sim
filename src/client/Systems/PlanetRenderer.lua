@@ -30,6 +30,7 @@ local PlanetRenderer = {}
 
 function PlanetRenderer:Init()
 	self._trueRadius = Planet.lodRadius()
+	self._atmoRadius = Config.BODY.radius + Config.ATMOSPHERE.top
 	-- Comfortably inside Roblox's render range, and beyond the camera's max zoom
 	-- so the planet always sorts behind the (nearby) craft.
 	self._maxRender = math.max(12000, Config.CAMERA.distanceMax * 1.3)
@@ -55,6 +56,24 @@ function PlanetRenderer:Start()
 	ball.Parent = Workspace
 	self._ball = ball
 
+	-- Translucent atmosphere shell (purely cosmetic), clamped together with the
+	-- planet so it always encloses the body proxy.
+	local atmo = Instance.new("Part")
+	atmo.Name = "Atmosphere"
+	atmo.Shape = Enum.PartType.Ball
+	atmo.Size = Vector3.new(self._atmoRadius * 2, self._atmoRadius * 2, self._atmoRadius * 2)
+	atmo.Anchored = true
+	atmo.CanCollide = false
+	atmo.CanQuery = false
+	atmo.CanTouch = false
+	atmo.CastShadow = false
+	atmo.Color = Config.ATMOSPHERE.color
+	atmo.Material = Enum.Material.ForceField
+	atmo.Transparency = 0.55
+	atmo.CFrame = CFrame.new(0, 0, 0)
+	atmo.Parent = Workspace
+	self._atmo = atmo
+
 	-- Update after the camera has been positioned for this frame.
 	RunService:BindToRenderStep("RocketSim_Planet", Enum.RenderPriority.Camera.Value + 2, function()
 		self:_update()
@@ -73,19 +92,32 @@ function PlanetRenderer:_update()
 	local toPlanet = center - camPos
 	local dist = toPlanet.Magnitude
 
+	local atmo = self._atmo
 	if dist <= self._maxRender or dist < 1e-3 then
 		-- Close enough to draw at true scale; terrain aligns with it.
 		if self._lastDist ~= 0 then
 			ball.Size = Vector3.new(self._trueRadius * 2, self._trueRadius * 2, self._trueRadius * 2)
+			if atmo then
+				atmo.Size = Vector3.new(self._atmoRadius * 2, self._atmoRadius * 2, self._atmoRadius * 2)
+			end
 			self._lastDist = 0
 		end
 		ball.CFrame = CFrame.new(center)
+		if atmo then
+			atmo.CFrame = CFrame.new(center)
+		end
 	else
 		-- Pull the far planet into render range, preserving its angular size.
 		local scale = self._maxRender / dist
+		local clamped = camPos + toPlanet.Unit * self._maxRender
 		local r = self._trueRadius * scale
 		ball.Size = Vector3.new(r * 2, r * 2, r * 2)
-		ball.CFrame = CFrame.new(camPos + toPlanet.Unit * self._maxRender)
+		ball.CFrame = CFrame.new(clamped)
+		if atmo then
+			local ar = self._atmoRadius * scale
+			atmo.Size = Vector3.new(ar * 2, ar * 2, ar * 2)
+			atmo.CFrame = CFrame.new(clamped)
+		end
 		self._lastDist = dist
 	end
 end

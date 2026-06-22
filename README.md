@@ -101,6 +101,12 @@ the craft `LANDED`s; `3` (RadialOut) + Shift to lift off again.
 
 ## Roadmap
 
-- **Phase 3:** VAB part builder + mass/staging/delta-v stats feeding thrust.
-- **Phase 4:** second body, sphere-of-influence transitions, maneuver nodes.
-- **Phase 5:** atmosphere/drag via the `extraAccel` hook, reentry, landing.
+- **Phase 3 (done):** VAB part builder + mass/staging/delta-v stats feeding thrust.
+- **Phase 4 (done):** render-distance Perlin terrain + always-visible planet proxy.
+- **Phase 6 (done):** landing physics on the kinematic core -- landing legs, footprint
+  contact against the terrain, and tip-over / crash classification (tilt, sideways
+  speed, ground slope, legs). (Phase 5 was a rigid-body experiment, since reverted.)
+- **Phase 7 (done):** atmosphere -- exponential air density driving aerodynamic drag
+  via the `extraAccel` hook and reentry heating. Inside the air, flight is integrated
+  numerically and time warp is pinned to 1x; above it, coasting is back on rails.
+- **Next:** second body (moon), sphere-of-influence transitions, maneuver nodes.

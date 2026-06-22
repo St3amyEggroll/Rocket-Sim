@@ -116,10 +116,11 @@ function HUDController:_build(parent)
 	L.radar = newRow(readout, 2, 18, 15)
 	L.speed = newRow(readout, 3, 18, 15)
 	L.vspeed = newRow(readout, 4, 18, 15)
-	L.apoapsis = newRow(readout, 5, 18, 15)
-	L.periapsis = newRow(readout, 6, 18, 15)
-	L.ecc = newRow(readout, 7, 18, 15)
-	L.period = newRow(readout, 8, 18, 15)
+	L.air = newRow(readout, 5, 18, 15)
+	L.apoapsis = newRow(readout, 6, 18, 15)
+	L.periapsis = newRow(readout, 7, 18, 15)
+	L.ecc = newRow(readout, 8, 18, 15)
+	L.period = newRow(readout, 9, 18, 15)
 
 	-- Vehicle panel (bottom-left).
 	local veh = newPanel(gui, 250, Vector2.new(0, 1), UDim2.new(0, 16, 1, -16))
@@ -165,6 +166,22 @@ function HUDController:_update(state, info)
 	L.radar.Text = "Radar alt: " .. fmt(radarAlt)
 	L.speed.Text = "Speed:     " .. fmt(r.speed) .. " st/s"
 	L.vspeed.Text = "Vert spd:  " .. fmt(vertSpeed) .. " st/s"
+
+	-- Air: density% inside the atmosphere, REENTRY when heating, vacuum above.
+	local Atmo = Config.ATMOSPHERE
+	if info.inAtmo then
+		local dens = math.exp(-math.max(r.altitude, 0) / Atmo.scaleHeight)
+		if (info.reentry or 0) > 0 then
+			L.air.Text = string.format("Air:       REENTRY  (%d%%)", math.floor(dens * 100 + 0.5))
+			L.air.TextColor3 = Color3.fromRGB(255, 120 - math.floor(60 * info.reentry), 70)
+		else
+			L.air.Text = string.format("Air:       %d%%", math.floor(dens * 100 + 0.5))
+			L.air.TextColor3 = Color3.fromRGB(150, 190, 230)
+		end
+	else
+		L.air.Text = "Air:       vacuum"
+		L.air.TextColor3 = Color3.fromRGB(120, 130, 145)
+	end
 	L.apoapsis.Text = "Apoapsis:  " .. (r.apoapsis == math.huge and "--" or fmt(r.apoapsis))
 	L.periapsis.Text = "Periapsis: " .. fmt(r.periapsis)
 	L.ecc.Text = "Ecc:       " .. string.format("%.4f", r.eccentricity)

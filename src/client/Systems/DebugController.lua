@@ -90,7 +90,7 @@ function DebugController:Start()
 end
 
 function DebugController:_text()
-	local lines = { "BUILD P6.1 (debug)" }
+	local lines = { "BUILD P7.0 (debug)" }
 	lines[#lines + 1] = "RS frames: " .. self._frames .. "   (` to hide)"
 
 	local Flight = Registry:GetOrNil("FlightController")

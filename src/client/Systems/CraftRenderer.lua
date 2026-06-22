@@ -200,10 +200,23 @@ function CraftRenderer:_rebuildCraft()
 	light.Enabled = false
 	light.Parent = flame
 
+	-- Reentry plasma envelope: a neon shell wrapping the craft, hidden until the
+	-- flight loop reports reentry heating (then it glows orange -> white-hot).
+	local glowH = math.max(y, 6)
+	local glow = makePart(model, "Reentry", {
+		Shape = Enum.PartType.Ball,
+		Size = Vector3.new(bottomRadius * 3.4, glowH * 1.25, bottomRadius * 3.4),
+		Color = Color3.fromRGB(255, 140, 50),
+		Material = Enum.Material.Neon,
+		Transparency = 1,
+		CFrame = CFrame.new(0, glowH * 0.4, 0),
+	})
+
 	model.Parent = Workspace
 	self._craft = model
 	self._flame = flame
 	self._flameLight = light
+	self._reentryGlow = glow
 end
 
 function CraftRenderer:_render(state, info)
@@ -220,6 +233,15 @@ function CraftRenderer:_render(state, info)
 	else
 		self._flame.Transparency = 1
 		self._flameLight.Enabled = false
+	end
+
+	local re = (info and info.reentry) or 0
+	if re > 0 then
+		self._reentryGlow.Transparency = 1 - 0.6 * re
+		-- orange (cool) -> white-hot (hot)
+		self._reentryGlow.Color = Color3.fromRGB(255, 140 + math.floor(90 * re), 50 + math.floor(150 * re))
+	else
+		self._reentryGlow.Transparency = 1
 	end
 end
 

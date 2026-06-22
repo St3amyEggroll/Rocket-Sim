@@ -42,6 +42,20 @@ Config.FLIGHT = {
 	landSpeed = 32, -- touchdown faster than this (studs/s) counts as a crash
 }
 
+-- Atmosphere: an exponential air layer that produces aerodynamic drag (an extra
+-- acceleration fed to OrbitMechanics.integrate) and reentry heating. Inside it the
+-- flight is integrated numerically (drag is not a conic force) and time warp is
+-- pinned to 1x, exactly like KSP. Above ATMOSPHERE.top the air is gone and coasting
+-- is back on analytic rails.
+Config.ATMOSPHERE = {
+	top = 600, -- studs above sea level where the air becomes negligible
+	scaleHeight = 130, -- air density e-folds (1/e) over this many studs of altitude
+	dragCoeff = 0.008, -- drag accel = dragCoeff * densityFrac * speed^2 * dragArea / mass
+	reentryQ = 1800, -- densityFrac*speed^2 above this begins reentry heating FX
+	maxReentryQ = 9000, -- ...and it saturates here
+	color = Color3.fromRGB(120, 170, 255), -- atmosphere haze tint
+}
+
 Config.CRAFT = {
 	radius = 14,
 	riderHeight = 7,
