@@ -337,14 +337,31 @@ function FlightController:_step(rawDt)
 	})
 end
 
--- Collide with the terrain: if the craft has reached the surface, either rest on it
--- (slow) or be destroyed (impact faster than the crash speed).
+-- Whole-body terrain collision: sample the entire rocket (base -> nose), so ANY
+-- part touching the ground counts (a sideways/tumbling craft hits on its side, not
+-- just the engine). If the deepest point has reached the terrain, rest the craft on
+-- it (slow) or destroy it (impact faster than the crash speed).
 function FlightController:_checkTouchdown()
 	local p = self._state.position
-	local nr = math.sqrt(p.x * p.x + p.y * p.y + p.z * p.z)
-	local surf = Planet.radiusForSim(p) -- terrain height beneath the craft
+	local nose = self._attitude.LookVector -- base -> nose, unit
+	local len = self._vehicle:GetRotProfile().length
 
-	if nr >= surf then
+	local maxPen = 0
+	local s = 0
+	while s <= len + 1e-3 do
+		local wx, wy, wz = p.x + nose.X * s, p.y + nose.Y * s, p.z + nose.Z * s
+		local wr = math.sqrt(wx * wx + wy * wy + wz * wz)
+		if wr > 1e-6 then
+			local surf = Planet.radiusForUnit(wx / wr, wy / wr, wz / wr)
+			local pen = surf - wr
+			if pen > maxPen then
+				maxPen = pen
+			end
+		end
+		s += 2 -- sample every ~2 studs along the body
+	end
+
+	if maxPen <= 0 then
 		self._landed = false
 		return
 	end
@@ -352,14 +369,14 @@ function FlightController:_checkTouchdown()
 	local vel = self._state.velocity
 	local impact = math.sqrt(vel.x * vel.x + vel.y * vel.y + vel.z * vel.z)
 
-	-- Rest the base on the surface.
-	local s = surf / nr
-	self._state.position = Orbit.vec(p.x * s, p.y * s, p.z * s)
+	-- Lift the craft out along the radial so the deepest point clears the surface.
+	local up = unit(p) or Orbit.vec(0, 1, 0)
+	self._state.position = Orbit.vec(p.x + up.x * maxPen, p.y + up.y * maxPen, p.z + up.z * maxPen)
 	self._state.velocity = Orbit.vec(0, 0, 0)
 	self._landed = true
 
 	if impact > Config.FLIGHT.crashSpeed then
-		self._crashed = true -- too fast: the renderer blows it up
+		self._crashed = true -- too fast: the renderer blows the whole rocket apart
 		self._status = "Crashed"
 	else
 		self._crashed = false

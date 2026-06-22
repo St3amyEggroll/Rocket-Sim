@@ -8,6 +8,7 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 local Lighting = game:GetService("Lighting")
+local Debris = game:GetService("Debris")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 
 local Orbit = require(Shared:WaitForChild("OrbitMechanics"))
@@ -204,18 +205,37 @@ function CraftRenderer:_rebuildCraft()
 	self._exploded = false
 end
 
--- Blow the craft apart on a crash (impact over the crash speed).
+-- Blow the craft apart on a crash: every part becomes physics debris flung by the
+-- blast (this is dead wreckage, so Roblox physics here is safe), cleaned up after a
+-- few seconds. Flight itself never touches the Roblox solver.
 function CraftRenderer:_explode(at)
+	local model = self._craft
+	self._craft = nil
+
+	if model then
+		for _, part in ipairs(model:GetDescendants()) do
+			if part:IsA("BasePart") then
+				local n = part.Name
+				if n == "Root" or n == "Flame" or n == "Reentry" then
+					part:Destroy() -- non-structural helpers, not debris
+				else
+					part.Anchored = false
+					part.CanCollide = true
+					part.CanQuery = true
+					part.CastShadow = true
+				end
+			end
+		end
+		model.Name = "Wreckage"
+		Debris:AddItem(model, 6)
+	end
+
 	local ex = Instance.new("Explosion")
 	ex.Position = at
-	ex.BlastRadius = 28
-	ex.BlastPressure = 0 -- visual only; physics is ours, not Roblox's
-	ex.DestroyJointsOnExplode = false
+	ex.BlastRadius = 34
+	ex.BlastPressure = 600000 -- fling the debris apart
+	ex.DestroyJointsOnExplode = false -- don't ragdoll the player's avatar
 	ex.Parent = Workspace
-	if self._craft then
-		self._craft:Destroy()
-		self._craft = nil
-	end
 end
 
 function CraftRenderer:_render(state, info)
