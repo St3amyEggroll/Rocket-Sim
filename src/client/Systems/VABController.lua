@@ -2,19 +2,20 @@
 	VABController
 	Owner of: the Vehicle Assembly Building UI (shown only in VAB mode).
 
-	KSP-style layout:
-	  Left   = parts palette with category tabs (Pods / Fuel / Engines / Struct);
-	           click a part card to add it on top of the stack.
-	  Middle = the rocket stack (top -> bottom), each row colour-coded with a stage
-	           badge; click a row to remove that part.
-	  Right  = live stats: total ΔV, mass, launch TWR, and per-stage ΔV.
+	KSP-style DRAG-AND-DROP assembly:
+	  Left   = parts palette (category tabs). DRAG a part onto the rocket to add it.
+	  Centre = the rocket, built bottom -> top. The first part dropped is the anchor;
+	           each further part snaps in where you drop it (a guide line shows where).
+	           Click a part to select it.
+	  Right  = the selected part's stats, plus the whole-craft summary + a Remove.
 	  Bottom = LAUNCH / CLEAR.
 
-	It only drives the design through VehicleController and the mode through
-	GameModeController; it owns no flight state.
+	It drives the design through VehicleController (InsertPart / RemovePart / Clear)
+	and the mode through GameModeController; it owns no flight state.
 ]]
 
 local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 
@@ -29,8 +30,8 @@ local ROW = Color3.fromRGB(30, 34, 44)
 local ACCENT = Color3.fromRGB(120, 200, 255)
 local TEXT = Color3.fromRGB(230, 234, 240)
 local DIM = Color3.fromRGB(150, 158, 170)
+local PX_PER_STUD = 7 -- vertical scale of the rocket diagram
 
--- Category display order + look (KSP-ish names and colours).
 local CATS = {
 	{ id = "command", label = "Pods", color = Color3.fromRGB(90, 150, 230) },
 	{ id = "fuel", label = "Fuel", color = Color3.fromRGB(200, 205, 215) },
@@ -57,7 +58,6 @@ local function panel(parent, pos, size, title)
 	f.BorderSizePixel = 0
 	f.Parent = parent
 	corner(f, 10)
-
 	local header = Instance.new("TextLabel")
 	header.Size = UDim2.new(1, -24, 0, 22)
 	header.Position = UDim2.fromOffset(14, 10)
@@ -72,10 +72,13 @@ local function panel(parent, pos, size, title)
 end
 
 function VABController:Init()
-	self._rows = {}
 	self._partCards = {}
 	self._tabBtns = {}
+	self._blocks = {}
 	self._activeCat = CATS[1].id
+	self._selected = nil
+	self._drag = nil
+	self._dropIndex = nil
 end
 
 function VABController:Start()
@@ -90,11 +93,24 @@ function VABController:Start()
 	end)
 	self._mode.ModeChanged:Connect(function(m)
 		self._gui.Enabled = (m == "VAB")
+		if m ~= "VAB" then
+			self:_cancelDrag()
+		end
 	end)
 	self._gui.Enabled = (self._mode:GetMode() == "VAB")
+
+	UserInputService.InputChanged:Connect(function(input)
+		self:_onInputChanged(input)
+	end)
+	UserInputService.InputEnded:Connect(function(input)
+		self:_onInputEnded(input)
+	end)
+
 	self:_renderPalette()
 	self:_refresh()
 end
+
+-- ---------------------------------------------------------------- build ----
 
 function VABController:_build(parentGui)
 	local gui = Instance.new("ScreenGui")
@@ -105,15 +121,13 @@ function VABController:_build(parentGui)
 	gui.Parent = parentGui
 	self._gui = gui
 
-	-- Backdrop so the build screen reads as its own room, not floating over flight.
 	local bg = Instance.new("Frame")
 	bg.Size = UDim2.fromScale(1, 1)
 	bg.BackgroundColor3 = Color3.fromRGB(8, 9, 13)
-	bg.BackgroundTransparency = 0.4
+	bg.BackgroundTransparency = 0.35
 	bg.BorderSizePixel = 0
 	bg.Parent = gui
 
-	-- Centered fixed-size workspace so the panels line up on any resolution.
 	local root = Instance.new("Frame")
 	root.AnchorPoint = Vector2.new(0.5, 0)
 	root.Position = UDim2.new(0.5, 0, 0, 14)
@@ -131,15 +145,25 @@ function VABController:_build(parentGui)
 	title.Parent = root
 
 	self:_buildPalette(root)
-	self:_buildStack(root)
-	self:_buildStats(root)
+	self:_buildCanvas(root)
+	self:_buildRight(root)
 	self:_buildControls(root)
+
+	-- Drop guide line (where a dragged part will snap in) + drag layer live on the gui.
+	local line = Instance.new("Frame")
+	line.Name = "DropLine"
+	line.BackgroundColor3 = ACCENT
+	line.BorderSizePixel = 0
+	line.ZIndex = 40
+	line.Visible = false
+	line.Parent = gui
+	corner(line, 2)
+	self._dropLine = line
 end
 
 function VABController:_buildPalette(root)
-	local pane = panel(root, UDim2.fromOffset(0, 46), UDim2.fromOffset(284, 408), "PARTS")
+	local pane = panel(root, UDim2.fromOffset(0, 46), UDim2.fromOffset(250, 408), "PARTS  (drag onto rocket)")
 
-	-- Category tabs.
 	local tabs = Instance.new("Frame")
 	tabs.Position = UDim2.fromOffset(12, 38)
 	tabs.Size = UDim2.new(1, -24, 0, 30)
@@ -184,18 +208,15 @@ function VABController:_buildPalette(root)
 end
 
 function VABController:_renderPalette()
-	-- Highlight the active tab.
 	for id, b in pairs(self._tabBtns) do
 		local active = (id == self._activeCat)
 		b.BackgroundColor3 = active and CAT_COLOR[id] or ROW
 		b.TextColor3 = active and Color3.fromRGB(20, 22, 28) or DIM
 	end
-
 	for _, card in ipairs(self._partCards) do
 		card:Destroy()
 	end
 	self._partCards = {}
-
 	for _, id in ipairs(Catalog.order) do
 		local def = Catalog.get(id)
 		if def.category == self._activeCat then
@@ -206,13 +227,10 @@ end
 
 function VABController:_addPartCard(def, id)
 	local b = Instance.new("TextButton")
-	b.Size = UDim2.new(1, 0, 0, 52)
+	b.Size = UDim2.new(1, 0, 0, 50)
 	b.BackgroundColor3 = ROW
+	b.AutoButtonColor = true
 	b.BorderSizePixel = 0
-	b.Font = Enum.Font.Gotham
-	b.TextSize = 13
-	b.TextColor3 = TEXT
-	b.TextXAlignment = Enum.TextXAlignment.Left
 	b.Text = ""
 	b.Parent = self._paletteList
 	corner(b, 6)
@@ -226,8 +244,8 @@ function VABController:_addPartCard(def, id)
 	corner(stripe, 3)
 
 	local name = Instance.new("TextLabel")
-	name.Size = UDim2.new(1, -52, 0, 20)
-	name.Position = UDim2.fromOffset(18, 7)
+	name.Size = UDim2.new(1, -24, 0, 20)
+	name.Position = UDim2.fromOffset(18, 6)
 	name.BackgroundTransparency = 1
 	name.Font = Enum.Font.GothamBold
 	name.TextSize = 14
@@ -236,118 +254,121 @@ function VABController:_addPartCard(def, id)
 	name.Text = def.name
 	name.Parent = b
 
-	local detail
-	if def.category == "engine" then
-		detail = string.format("thrust %d   ve %d", def.thrust, def.exhaustVelocity)
-	elseif def.category == "fuel" then
-		detail = string.format("fuel %.1f   mass %.2f", def.fuel, def.mass)
-	else
-		detail = string.format("mass %.2f", def.mass)
-	end
-	local sub = Instance.new("TextLabel")
-	sub.Size = UDim2.new(1, -52, 0, 16)
-	sub.Position = UDim2.fromOffset(18, 28)
-	sub.BackgroundTransparency = 1
-	sub.Font = Enum.Font.Code
-	sub.TextSize = 12
-	sub.TextXAlignment = Enum.TextXAlignment.Left
-	sub.TextColor3 = DIM
-	sub.Text = detail
-	sub.Parent = b
+	local hint = Instance.new("TextLabel")
+	hint.Size = UDim2.new(1, -24, 0, 16)
+	hint.Position = UDim2.fromOffset(18, 27)
+	hint.BackgroundTransparency = 1
+	hint.Font = Enum.Font.Code
+	hint.TextSize = 11
+	hint.TextXAlignment = Enum.TextXAlignment.Left
+	hint.TextColor3 = DIM
+	hint.Text = "drag to add"
+	hint.Parent = b
 
-	local plus = Instance.new("TextLabel")
-	plus.AnchorPoint = Vector2.new(1, 0.5)
-	plus.Position = UDim2.new(1, -10, 0.5, 0)
-	plus.Size = UDim2.fromOffset(24, 24)
-	plus.BackgroundTransparency = 1
-	plus.Font = Enum.Font.GothamBold
-	plus.TextSize = 22
-	plus.TextColor3 = ACCENT
-	plus.Text = "+"
-	plus.Parent = b
-
-	b.Activated:Connect(function()
-		self._vehicle:AddPart(id)
+	b.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			self:_startDrag(id, input.Position)
+		end
 	end)
 	table.insert(self._partCards, b)
 end
 
-function VABController:_buildStack(root)
-	local pane = panel(root, UDim2.fromOffset(296, 46), UDim2.fromOffset(330, 408), "YOUR ROCKET  (top -> bottom)")
+function VABController:_buildCanvas(root)
+	local pane = panel(root, UDim2.fromOffset(262, 46), UDim2.fromOffset(360, 408), "ROCKET  (bottom -> top)")
 	local scroller = Instance.new("ScrollingFrame")
-	scroller.Position = UDim2.fromOffset(12, 40)
-	scroller.Size = UDim2.new(1, -24, 1, -52)
+	scroller.Position = UDim2.fromOffset(10, 38)
+	scroller.Size = UDim2.new(1, -20, 1, -50)
 	scroller.BackgroundTransparency = 1
 	scroller.BorderSizePixel = 0
 	scroller.ScrollBarThickness = 5
 	scroller.CanvasSize = UDim2.new()
 	scroller.AutomaticCanvasSize = Enum.AutomaticSize.Y
 	scroller.Parent = pane
-	local sl = Instance.new("UIListLayout")
-	sl.Padding = UDim.new(0, 5)
-	sl.Parent = scroller
-	self._stackList = scroller
+	local list = Instance.new("UIListLayout")
+	list.Padding = UDim.new(0, 2)
+	list.HorizontalAlignment = Enum.HorizontalAlignment.Center
+	list.SortOrder = Enum.SortOrder.LayoutOrder
+	list.Parent = scroller
+	self._canvas = scroller
 
-	self._emptyHint = Instance.new("TextLabel")
-	self._emptyHint.Size = UDim2.new(1, -24, 0, 60)
-	self._emptyHint.Position = UDim2.fromOffset(12, 56)
-	self._emptyHint.BackgroundTransparency = 1
-	self._emptyHint.Font = Enum.Font.Gotham
-	self._emptyHint.TextSize = 14
-	self._emptyHint.TextWrapped = true
-	self._emptyHint.TextColor3 = DIM
-	self._emptyHint.Text = "Empty. Pick parts on the left -- start with an engine at the bottom, add tanks, then a pod on top."
-	self._emptyHint.Parent = pane
+	local hint = Instance.new("TextLabel")
+	hint.Name = "EmptyHint"
+	hint.AnchorPoint = Vector2.new(0.5, 0.5)
+	hint.Position = UDim2.fromScale(0.5, 0.5)
+	hint.Size = UDim2.new(1, -40, 0, 80)
+	hint.BackgroundTransparency = 1
+	hint.Font = Enum.Font.Gotham
+	hint.TextSize = 15
+	hint.TextWrapped = true
+	hint.TextColor3 = DIM
+	hint.Text = "Drag parts here from the left.\nStart with an engine (the anchor), then add tanks and a pod on top."
+	hint.Parent = pane
+	self._emptyHint = hint
 end
 
-function VABController:_buildStats(root)
-	local pane = panel(root, UDim2.fromOffset(638, 46), UDim2.fromOffset(310, 408), "STATS")
+function VABController:_buildRight(root)
+	local pane = panel(root, UDim2.fromOffset(634, 46), UDim2.fromOffset(314, 408), "PART")
 
-	-- Headline delta-v.
-	self._dvBig = Instance.new("TextLabel")
-	self._dvBig.Position = UDim2.fromOffset(14, 40)
-	self._dvBig.Size = UDim2.new(1, -28, 0, 46)
-	self._dvBig.BackgroundTransparency = 1
-	self._dvBig.Font = Enum.Font.GothamBold
-	self._dvBig.TextSize = 34
-	self._dvBig.TextXAlignment = Enum.TextXAlignment.Left
-	self._dvBig.TextColor3 = TEXT
-	self._dvBig.Text = "0 dV"
-	self._dvBig.Parent = pane
+	self._partLabel = Instance.new("TextLabel")
+	self._partLabel.Position = UDim2.fromOffset(14, 40)
+	self._partLabel.Size = UDim2.new(1, -28, 0, 150)
+	self._partLabel.BackgroundTransparency = 1
+	self._partLabel.Font = Enum.Font.Code
+	self._partLabel.TextSize = 14
+	self._partLabel.TextXAlignment = Enum.TextXAlignment.Left
+	self._partLabel.TextYAlignment = Enum.TextYAlignment.Top
+	self._partLabel.TextColor3 = TEXT
+	self._partLabel.Text = ""
+	self._partLabel.Parent = pane
 
-	local sub = Instance.new("TextLabel")
-	sub.Position = UDim2.fromOffset(14, 84)
-	sub.Size = UDim2.new(1, -28, 0, 16)
-	sub.BackgroundTransparency = 1
-	sub.Font = Enum.Font.Code
-	sub.TextSize = 12
-	sub.TextXAlignment = Enum.TextXAlignment.Left
-	sub.TextColor3 = DIM
-	sub.Text = "total delta-v (studs/s)"
-	sub.Parent = pane
+	self._removeBtn = Instance.new("TextButton")
+	self._removeBtn.Position = UDim2.fromOffset(14, 196)
+	self._removeBtn.Size = UDim2.new(1, -28, 0, 32)
+	self._removeBtn.BackgroundColor3 = Color3.fromRGB(120, 60, 60)
+	self._removeBtn.BorderSizePixel = 0
+	self._removeBtn.Font = Enum.Font.GothamBold
+	self._removeBtn.TextSize = 14
+	self._removeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+	self._removeBtn.Text = "Remove Part"
+	self._removeBtn.Visible = false
+	self._removeBtn.Parent = pane
+	corner(self._removeBtn, 6)
+	self._removeBtn.Activated:Connect(function()
+		if self._selected then
+			self._vehicle:RemovePart(self._selected)
+			self._selected = nil
+		end
+	end)
 
-	self._stabLabel = Instance.new("TextLabel")
-	self._stabLabel.Position = UDim2.fromOffset(14, 106)
-	self._stabLabel.Size = UDim2.new(1, -28, 0, 20)
-	self._stabLabel.BackgroundTransparency = 1
-	self._stabLabel.Font = Enum.Font.GothamBold
-	self._stabLabel.TextSize = 14
-	self._stabLabel.TextXAlignment = Enum.TextXAlignment.Left
-	self._stabLabel.TextColor3 = TEXT
-	self._stabLabel.Text = ""
-	self._stabLabel.Parent = pane
+	local div = Instance.new("Frame")
+	div.Position = UDim2.fromOffset(14, 240)
+	div.Size = UDim2.new(1, -28, 0, 1)
+	div.BackgroundColor3 = Color3.fromRGB(60, 66, 80)
+	div.BorderSizePixel = 0
+	div.Parent = pane
 
-	self._statsLabel = Instance.new("TextLabel")
-	self._statsLabel.Position = UDim2.fromOffset(14, 132)
-	self._statsLabel.Size = UDim2.new(1, -28, 1, -144)
-	self._statsLabel.BackgroundTransparency = 1
-	self._statsLabel.Font = Enum.Font.Code
-	self._statsLabel.TextSize = 14
-	self._statsLabel.TextXAlignment = Enum.TextXAlignment.Left
-	self._statsLabel.TextYAlignment = Enum.TextYAlignment.Top
-	self._statsLabel.TextColor3 = TEXT
-	self._statsLabel.Text = ""
-	self._statsLabel.Parent = pane
+	local craftTitle = Instance.new("TextLabel")
+	craftTitle.Position = UDim2.fromOffset(14, 250)
+	craftTitle.Size = UDim2.new(1, -28, 0, 18)
+	craftTitle.BackgroundTransparency = 1
+	craftTitle.Font = Enum.Font.GothamBold
+	craftTitle.TextSize = 13
+	craftTitle.TextXAlignment = Enum.TextXAlignment.Left
+	craftTitle.TextColor3 = ACCENT
+	craftTitle.Text = "CRAFT"
+	craftTitle.Parent = pane
+
+	self._craftLabel = Instance.new("TextLabel")
+	self._craftLabel.Position = UDim2.fromOffset(14, 272)
+	self._craftLabel.Size = UDim2.new(1, -28, 1, -284)
+	self._craftLabel.BackgroundTransparency = 1
+	self._craftLabel.Font = Enum.Font.Code
+	self._craftLabel.TextSize = 14
+	self._craftLabel.TextXAlignment = Enum.TextXAlignment.Left
+	self._craftLabel.TextYAlignment = Enum.TextYAlignment.Top
+	self._craftLabel.TextColor3 = TEXT
+	self._craftLabel.Text = ""
+	self._craftLabel.Parent = pane
 end
 
 function VABController:_buildControls(root)
@@ -381,136 +402,236 @@ function VABController:_buildControls(root)
 	clear.Parent = root
 	corner(clear, 10)
 	clear.Activated:Connect(function()
+		self._selected = nil
 		self._vehicle:Clear()
 	end)
+end
 
-	local hint = Instance.new("TextLabel")
-	hint.AnchorPoint = Vector2.new(1, 1)
-	hint.Position = UDim2.new(1, 0, 1, -16)
-	hint.Size = UDim2.fromOffset(420, 24)
-	hint.BackgroundTransparency = 1
-	hint.Font = Enum.Font.Code
-	hint.TextSize = 13
-	hint.TextXAlignment = Enum.TextXAlignment.Right
-	hint.TextColor3 = DIM
-	hint.Text = "Click a part to add on top  |  click a stack row to remove  |  B toggles build / flight"
-	hint.Parent = root
+-- ------------------------------------------------------------- assembly ----
+
+function VABController:_blockSize(def)
+	local h = math.max(def.height or 0, 1.7) * PX_PER_STUD
+	local w = math.clamp((def.radius or 3) * 16, 34, 300)
+	return w, h
 end
 
 function VABController:_refresh()
-	-- Rebuild the stack list (shown top -> bottom; design is bottom -> top).
-	for _, row in ipairs(self._rows) do
-		row:Destroy()
-	end
-	self._rows = {}
-
 	local design = self._vehicle:GetDesign()
 	local stats = self._vehicle:GetStats()
-	self._emptyHint.Visible = (#design == 0)
+	local n = #design
 
-	for displayPos = #design, 1, -1 do
-		local def = design[displayPos]
-		local stage = stats.stageOfPart[displayPos] or 0
-		local row = Instance.new("TextButton")
-		row.Size = UDim2.new(1, 0, 0, 34)
-		row.BackgroundColor3 = ROW
-		row.BorderSizePixel = 0
-		row.Font = Enum.Font.Gotham
-		row.TextSize = 13
-		row.AutoButtonColor = true
-		row.Text = ""
-		row.LayoutOrder = #design - displayPos
-		row.Parent = self._stackList
-		corner(row, 6)
+	if self._selected and not design[self._selected] then
+		self._selected = nil
+	end
+	self._emptyHint.Visible = (n == 0)
 
-		local stripe = Instance.new("Frame")
-		stripe.Size = UDim2.new(0, 5, 1, -10)
-		stripe.Position = UDim2.fromOffset(6, 5)
-		stripe.BackgroundColor3 = def.color or DIM
-		stripe.BorderSizePixel = 0
-		stripe.Parent = row
-		corner(stripe, 3)
+	for _, b in ipairs(self._blocks) do
+		b.frame:Destroy()
+	end
+	self._blocks = {}
 
-		local name = Instance.new("TextLabel")
-		name.Size = UDim2.new(1, -110, 1, 0)
-		name.Position = UDim2.fromOffset(18, 0)
-		name.BackgroundTransparency = 1
-		name.Font = Enum.Font.Gotham
-		name.TextSize = 14
-		name.TextXAlignment = Enum.TextXAlignment.Left
-		name.TextColor3 = TEXT
-		name.Text = def.name
-		name.Parent = row
+	for index = 1, n do
+		local def = design[index]
+		local w, h = self:_blockSize(def)
+		local block = Instance.new("TextButton")
+		block.Size = UDim2.fromOffset(w, h)
+		block.BackgroundColor3 = def.color
+		block.AutoButtonColor = false
+		block.BorderSizePixel = 0
+		block.Text = ""
+		block.LayoutOrder = n - index -- index 1 (bottom) sorts last -> bottom of the list
+		block.Parent = self._canvas
+		corner(block, 5)
 
-		local badge = Instance.new("TextLabel")
-		badge.AnchorPoint = Vector2.new(1, 0.5)
-		badge.Position = UDim2.new(1, -58, 0.5, 0)
-		badge.Size = UDim2.fromOffset(44, 20)
-		badge.BackgroundColor3 = (stage > 0) and Color3.fromRGB(44, 50, 64) or Color3.fromRGB(34, 38, 48)
-		badge.Font = Enum.Font.GothamBold
-		badge.TextSize = 11
-		badge.TextColor3 = (stage > 0) and ACCENT or DIM
-		badge.Text = (stage > 0) and ("STG " .. stage) or "PAY"
-		badge.Parent = row
-		corner(badge, 5)
+		local lbl = Instance.new("TextLabel")
+		lbl.Size = UDim2.fromScale(1, 1)
+		lbl.BackgroundTransparency = 1
+		lbl.Font = Enum.Font.GothamBold
+		lbl.TextSize = 12
+		lbl.TextColor3 = Color3.fromRGB(20, 22, 28)
+		lbl.TextStrokeTransparency = 0.6
+		lbl.Text = def.name
+		lbl.Parent = block
 
-		local rm = Instance.new("TextLabel")
-		rm.AnchorPoint = Vector2.new(1, 0.5)
-		rm.Position = UDim2.new(1, -10, 0.5, 0)
-		rm.Size = UDim2.fromOffset(40, 20)
-		rm.BackgroundTransparency = 1
-		rm.Font = Enum.Font.Code
-		rm.TextSize = 12
-		rm.TextColor3 = Color3.fromRGB(220, 120, 120)
-		rm.Text = "remove"
-		rm.Parent = row
+		local stroke = Instance.new("UIStroke")
+		stroke.Thickness = 2
+		stroke.Color = ACCENT
+		stroke.Enabled = (index == self._selected)
+		stroke.Parent = block
 
-		row.Activated:Connect(function()
-			self._vehicle:RemovePart(displayPos)
+		local thisIndex = index
+		block.Activated:Connect(function()
+			self:_select(thisIndex)
 		end)
-		table.insert(self._rows, row)
+		table.insert(self._blocks, { index = index, frame = block, stroke = stroke })
 	end
 
-	-- Aerodynamic stability (CoP behind CoM = stable; fins at the tail help).
+	self:_updatePartPanel()
+
+	-- Craft summary.
 	local prof = self._vehicle:GetRotProfile()
+	local lines = {}
+	lines[#lines + 1] = string.format("dV total   %.0f", stats.totalDeltaV)
+	lines[#lines + 1] = string.format("Mass       %.2f t", stats.totalMass)
+	lines[#lines + 1] = string.format("Launch TWR %.2f", stats.launchTWR)
+	lines[#lines + 1] = string.format("Stages     %d", stats.stageCount)
 	if prof.mass > 0 then
 		local stable = prof.margin > 0
-		self._stabLabel.Text = string.format("Stability: %s  (%.1f)", stable and "STABLE" or "UNSTABLE", prof.margin)
-		self._stabLabel.TextColor3 = stable and Color3.fromRGB(110, 220, 130) or Color3.fromRGB(230, 110, 100)
-	else
-		self._stabLabel.Text = "Stability: --"
-		self._stabLabel.TextColor3 = DIM
-	end
-
-	-- Stats.
-	self._dvBig.Text = string.format("%.0f dV", stats.totalDeltaV)
-
-	local lines = {}
-	lines[#lines + 1] = string.format("Mass        %.2f t", stats.totalMass)
-	lines[#lines + 1] = string.format("Launch TWR  %.2f", stats.launchTWR)
-	lines[#lines + 1] = string.format("Stages      %d", stats.stageCount)
-	lines[#lines + 1] = ""
-	if stats.stageCount > 0 then
-		lines[#lines + 1] = "Per stage (fires 1 first):"
-		for k = 1, stats.stageCount do
-			lines[#lines + 1] = string.format("  stage %d   %5.0f dV", k, stats.stages[k].deltaV)
-		end
+		lines[#lines + 1] = "Stability  " .. (stable and "STABLE" or "UNSTABLE")
 	end
 	if stats.stageCount == 0 then
-		lines[#lines + 1] = "! No engine - add one!"
-	elseif stats.launchTWR < 1 then
 		lines[#lines + 1] = ""
-		lines[#lines + 1] = "! TWR < 1: it won't lift off"
-		lines[#lines + 1] = "   the ground (fine in orbit)."
+		lines[#lines + 1] = "! Add an engine to launch."
 	end
-	self._statsLabel.Text = table.concat(lines, "\n")
+	self._craftLabel.Text = table.concat(lines, "\n")
 
-	-- Disable launch with no engine.
 	local ready = stats.stageCount > 0
 	self._launchBtn.BackgroundColor3 = ready and Color3.fromRGB(60, 170, 90) or Color3.fromRGB(60, 70, 64)
-	self._launchBtn.Text = ready and "LAUNCH  ▶" or "ADD AN ENGINE"
+	self._launchBtn.Text = ready and "LAUNCH" or "ADD AN ENGINE"
 	self._launchBtn.Active = ready
 	self._launchBtn.AutoButtonColor = ready
+end
+
+function VABController:_select(index)
+	self._selected = index
+	for _, b in ipairs(self._blocks) do
+		b.stroke.Enabled = (b.index == index)
+	end
+	self:_updatePartPanel()
+end
+
+function VABController:_updatePartPanel()
+	local design = self._vehicle:GetDesign()
+	local def = self._selected and design[self._selected]
+	if not def then
+		self._partLabel.Text = "Click a part to inspect it."
+		self._partLabel.TextColor3 = DIM
+		self._removeBtn.Visible = false
+		return
+	end
+	self._partLabel.TextColor3 = TEXT
+	self._removeBtn.Visible = true
+	local lines = {}
+	lines[#lines + 1] = def.name
+	lines[#lines + 1] = "category  " .. def.category
+	lines[#lines + 1] = string.format("mass      %.2f t", def.mass or 0)
+	lines[#lines + 1] = string.format("size      %.1f x %.1f", (def.radius or 0) * 2, def.height or 0)
+	lines[#lines + 1] = string.format("drag      %.2f", def.drag or 0)
+	if def.fuel then
+		lines[#lines + 1] = string.format("fuel      %.1f", def.fuel)
+	end
+	if def.category == "engine" then
+		lines[#lines + 1] = string.format("thrust    %d", def.thrust or 0)
+		lines[#lines + 1] = string.format("exhaust v %d", def.exhaustVelocity or 0)
+	end
+	self._partLabel.Text = table.concat(lines, "\n")
+end
+
+-- ----------------------------------------------------------------- drag ----
+
+function VABController:_startDrag(id, pos)
+	self:_cancelDrag()
+	local def = Catalog.get(id)
+	if not def then
+		return
+	end
+	local ghost = Instance.new("Frame")
+	ghost.AnchorPoint = Vector2.new(0.5, 0.5)
+	ghost.Size = UDim2.fromOffset(130, 30)
+	ghost.BackgroundColor3 = def.color
+	ghost.BackgroundTransparency = 0.2
+	ghost.BorderSizePixel = 0
+	ghost.ZIndex = 50
+	ghost.Position = UDim2.fromOffset(pos.X, pos.Y)
+	ghost.Parent = self._gui
+	corner(ghost, 6)
+	local lbl = Instance.new("TextLabel")
+	lbl.Size = UDim2.fromScale(1, 1)
+	lbl.BackgroundTransparency = 1
+	lbl.Font = Enum.Font.GothamBold
+	lbl.TextSize = 13
+	lbl.TextColor3 = Color3.fromRGB(20, 22, 28)
+	lbl.ZIndex = 51
+	lbl.Text = def.name
+	lbl.Parent = ghost
+
+	self._drag = { id = id, ghost = ghost }
+	self._dropIndex = nil
+end
+
+function VABController:_cancelDrag()
+	if self._drag then
+		self._drag.ghost:Destroy()
+		self._drag = nil
+	end
+	self._dropIndex = nil
+	if self._dropLine then
+		self._dropLine.Visible = false
+	end
+end
+
+local function over(frame, x, y)
+	local ap, as = frame.AbsolutePosition, frame.AbsoluteSize
+	return x >= ap.X and x <= ap.X + as.X and y >= ap.Y and y <= ap.Y + as.Y
+end
+
+function VABController:_computeDrop(mouseY)
+	local n = #self._vehicle:GetDesign()
+	if n == 0 then
+		return 1
+	end
+	local list = table.clone(self._blocks)
+	table.sort(list, function(a, b)
+		return a.frame.AbsolutePosition.Y < b.frame.AbsolutePosition.Y
+	end)
+	local slot = 0
+	for _, b in ipairs(list) do
+		local mid = b.frame.AbsolutePosition.Y + b.frame.AbsoluteSize.Y * 0.5
+		if mouseY > mid then
+			slot += 1
+		else
+			break
+		end
+	end
+	return math.clamp(n + 1 - slot, 1, n + 1)
+end
+
+function VABController:_onInputChanged(input)
+	if not self._drag then
+		return
+	end
+	if input.UserInputType ~= Enum.UserInputType.MouseMovement and input.UserInputType ~= Enum.UserInputType.Touch then
+		return
+	end
+	local pos = input.Position
+	self._drag.ghost.Position = UDim2.fromOffset(pos.X, pos.Y)
+
+	if over(self._canvas, pos.X, pos.Y) then
+		self._dropIndex = self:_computeDrop(pos.Y)
+		local ap, as = self._canvas.AbsolutePosition, self._canvas.AbsoluteSize
+		self._dropLine.Visible = true
+		self._dropLine.Position = UDim2.fromOffset(ap.X + 8, pos.Y - 1)
+		self._dropLine.Size = UDim2.fromOffset(as.X - 16, 3)
+	else
+		self._dropIndex = nil
+		self._dropLine.Visible = false
+	end
+end
+
+function VABController:_onInputEnded(input)
+	if not self._drag then
+		return
+	end
+	if input.UserInputType ~= Enum.UserInputType.MouseButton1 and input.UserInputType ~= Enum.UserInputType.Touch then
+		return
+	end
+	local id = self._drag.id
+	local dropIndex = self._dropIndex
+	self:_cancelDrag()
+	if dropIndex then
+		self._selected = dropIndex
+		self._vehicle:InsertPart(dropIndex, id)
+	end
 end
 
 return VABController

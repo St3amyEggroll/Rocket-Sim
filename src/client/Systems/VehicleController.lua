@@ -53,6 +53,17 @@ function VehicleController:AddPart(id)
 	end
 end
 
+-- Insert a part at a stack position (1 = bottom). Used by drag-and-drop assembly.
+function VehicleController:InsertPart(index, id)
+	local def = Catalog.get(id)
+	if not def then
+		return
+	end
+	index = math.clamp(index, 1, #self._design + 1)
+	table.insert(self._design, index, def)
+	self:_recompute()
+end
+
 function VehicleController:RemovePart(index)
 	if self._design[index] then
 		table.remove(self._design, index)
