@@ -60,6 +60,10 @@ function FlightController:Start()
 	self._mode.ModeChanged:Connect(function(m)
 		self:_onMode(m)
 	end)
+	-- "Back to launch site" while already flying: reset the craft on the pad.
+	self._mode.LaunchReset:Connect(function()
+		self:_onMode("Flight")
+	end)
 	self._input:GetStageSignal():Connect(function()
 		if self._mode:GetMode() == "Flight" then
 			self._vehicle:Stage()

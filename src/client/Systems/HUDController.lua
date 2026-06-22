@@ -143,7 +143,7 @@ function HUDController:_build(parent)
 	hint.TextSize = 14
 	hint.TextColor3 = Color3.fromRGB(175, 185, 200)
 	hint.Text =
-		"WASD/QE Steer   Shift/Ctrl Throttle   1-5 SAS Pro/Retro/RadOut/RadIn/Ascent   Space Stage   . / , Warp   M Map   B Build   RMB Look   Wheel Zoom"
+		"WASD/QE Steer   Shift/Ctrl Throttle   1-5 SAS   Space Stage   . / , Warp   M Map   B Build   MENU (top-right) Revert/Relaunch"
 	hint.Parent = gui
 end
 

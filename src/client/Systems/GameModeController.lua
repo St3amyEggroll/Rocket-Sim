@@ -4,6 +4,10 @@
 
 	Other systems read GetMode() and listen to ModeChanged. The B key (via
 	InputController) and the VAB Launch button both route through SetMode.
+
+	ReturnToLaunch() is KSP's "Revert to Launch": it puts the craft back on the pad
+	with a fresh fuel load. If we are already flying it fires LaunchReset (which
+	FlightController turns into an in-place reset); from the VAB it just launches.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -17,6 +21,7 @@ local GameModeController = {}
 function GameModeController:Init()
 	self._mode = "VAB"
 	self.ModeChanged = Signal.new()
+	self.LaunchReset = Signal.new() -- "revert to launch" while already in Flight
 end
 
 function GameModeController:Start()
@@ -36,6 +41,15 @@ function GameModeController:SetMode(mode: string)
 	end
 	self._mode = mode
 	self.ModeChanged:Fire(mode)
+end
+
+-- Back to the launch site (KSP "Revert to Launch"): reset the craft on the pad.
+function GameModeController:ReturnToLaunch()
+	if self._mode ~= "Flight" then
+		self:SetMode("Flight") -- entering Flight already resets to the pad
+	else
+		self.LaunchReset:Fire() -- already flying: reset in place
+	end
 end
 
 return GameModeController

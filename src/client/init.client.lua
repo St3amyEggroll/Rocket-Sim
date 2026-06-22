@@ -33,6 +33,7 @@ local initOrder = {
 	"NavballController",
 	"VABController",
 	"HUDController",
+	"MenuController",
 }
 
 -- Listeners must Start before the flight loop begins firing events.
@@ -54,6 +55,7 @@ local startOrder = {
 	"NavballController",
 	"VABController",
 	"HUDController",
+	"MenuController",
 	"FlightController",
 }
 
@@ -89,4 +91,4 @@ for _, name in ipairs(startOrder) do
 	end
 end
 
-print("[RocketSim] Client systems started -- build P7.1 (6000-wide planet via scaled mesh sphere).")
+print("[RocketSim] Client systems started -- build P7.2 (KSP-style VAB + revert/back-to-launch menu).")
