@@ -1,16 +1,20 @@
 --[[
 	PlanetRenderer
-	Owner of: the always-visible planet body (the low-detail LOD).
+	Owner of: the always-visible planet body (the low-detail LOD) and its
+	cosmetic atmosphere shell.
 
-	Roblox will not draw even a 2000-stud anchored part once it is past the camera's
-	far render range, so a planet fixed at the world origin vanishes when you fly far
-	out. To guarantee the body is ALWAYS on screen we draw it as a distance-clamped
-	proxy: if the true planet centre is farther than maxRender from the camera, we
-	pull the sphere in to maxRender along the same line of sight and scale it by the
-	same factor. Angular size and screen direction are preserved exactly, so it looks
-	identical to the real body and shrinks to a dot as you leave - it just never
-	exits the render range. Within maxRender the sphere sits at its true position and
-	radius, so the streamed terrain (TerrainController) lines up on top of it.
+	The body is drawn as a MESH sphere (a Part with a SpecialMesh, sized via
+	mesh.Scale) rather than a Ball part. A Ball part is capped at 1024 radius (the
+	2048-stud part limit), which is fine for a small planet but cannot represent a
+	multi-thousand-stud world; a SpecialMesh has no such cap, so the body renders at
+	true scale right up to the surface and the streamed terrain (TerrainController)
+	sits seamlessly on top of it -- regardless of how big Config.BODY.radius is.
+
+	Roblox still will not draw a part whose (small) collision box is past the camera's
+	far render range, so when the true centre is farther than maxRender we pull the
+	sphere in along the line of sight and scale the mesh by the same factor: angular
+	size and screen direction are preserved exactly, so it looks identical to the real
+	body and shrinks to a dot as you leave -- it just never exits the render range.
 
 	This is purely how the body is DRAWN for the camera; what terrain loads is keyed
 	to the craft, not the camera (see TerrainController).
@@ -28,51 +32,45 @@ local Planet = require(Shared:WaitForChild("Planet"))
 
 local PlanetRenderer = {}
 
+-- Part collision-box size for the mesh spheres: big enough never to be distance-
+-- culled (even out at maxRender), small enough to stay under the 2048 part cap. The
+-- visible size is driven entirely by mesh.Scale = renderedDiameter / BASE.
+local BASE = 1000
+
 function PlanetRenderer:Init()
 	self._trueRadius = Planet.lodRadius()
 	self._atmoRadius = Config.BODY.radius + Config.ATMOSPHERE.top
 	-- Comfortably inside Roblox's render range, and beyond the camera's max zoom
 	-- so the planet always sorts behind the (nearby) craft.
 	self._maxRender = math.max(12000, Config.CAMERA.distanceMax * 1.3)
-	self._lastDist = -1
+end
+
+function PlanetRenderer:_makeSphere(name, color, material, transparency)
+	local p = Instance.new("Part")
+	p.Name = name
+	p.Anchored = true
+	p.CanCollide = false
+	p.CanQuery = false
+	p.CanTouch = false
+	p.CastShadow = false
+	p.Size = Vector3.new(BASE, BASE, BASE)
+	p.Color = color
+	p.Material = material
+	p.Transparency = transparency
+	p.CFrame = CFrame.new(0, 0, 0)
+	local mesh = Instance.new("SpecialMesh")
+	mesh.MeshType = Enum.MeshType.Sphere
+	mesh.Parent = p
+	p.Parent = Workspace
+	return p, mesh
 end
 
 function PlanetRenderer:Start()
 	self._origin = Registry:Get("FloatingOriginController")
 
-	local lod = self._trueRadius
-	local ball = Instance.new("Part")
-	ball.Name = "Planet"
-	ball.Shape = Enum.PartType.Ball
-	ball.Size = Vector3.new(lod * 2, lod * 2, lod * 2)
-	ball.Anchored = true
-	ball.CanCollide = false
-	ball.CanQuery = false
-	ball.CanTouch = false
-	ball.CastShadow = false
-	ball.Color = Config.BODY.grassColor
-	ball.Material = Enum.Material.Grass
-	ball.CFrame = CFrame.new(0, 0, 0)
-	ball.Parent = Workspace
-	self._ball = ball
-
-	-- Translucent atmosphere shell (purely cosmetic), clamped together with the
-	-- planet so it always encloses the body proxy.
-	local atmo = Instance.new("Part")
-	atmo.Name = "Atmosphere"
-	atmo.Shape = Enum.PartType.Ball
-	atmo.Size = Vector3.new(self._atmoRadius * 2, self._atmoRadius * 2, self._atmoRadius * 2)
-	atmo.Anchored = true
-	atmo.CanCollide = false
-	atmo.CanQuery = false
-	atmo.CanTouch = false
-	atmo.CastShadow = false
-	atmo.Color = Config.ATMOSPHERE.color
-	atmo.Material = Enum.Material.ForceField
-	atmo.Transparency = 0.55
-	atmo.CFrame = CFrame.new(0, 0, 0)
-	atmo.Parent = Workspace
-	self._atmo = atmo
+	self._ball, self._ballMesh = self:_makeSphere("Planet", Config.BODY.grassColor, Enum.Material.Grass, 0)
+	-- Translucent atmosphere shell (purely cosmetic), drawn concentric with the body.
+	self._atmo, self._atmoMesh = self:_makeSphere("Atmosphere", Config.ATMOSPHERE.color, Enum.Material.ForceField, 0.55)
 
 	-- Update after the camera has been positioned for this frame.
 	RunService:BindToRenderStep("RocketSim_Planet", Enum.RenderPriority.Camera.Value + 2, function()
@@ -80,10 +78,16 @@ function PlanetRenderer:Start()
 	end)
 end
 
+-- Size a mesh sphere to a rendered DIAMETER and place its centre.
+function PlanetRenderer:_apply(mesh, part, diameter, center)
+	local s = diameter / BASE
+	mesh.Scale = Vector3.new(s, s, s)
+	part.CFrame = CFrame.new(center)
+end
+
 function PlanetRenderer:_update()
 	local cam = Workspace.CurrentCamera
-	local ball = self._ball
-	if not cam or not ball then
+	if not cam or not self._ball then
 		return
 	end
 
@@ -92,33 +96,20 @@ function PlanetRenderer:_update()
 	local toPlanet = center - camPos
 	local dist = toPlanet.Magnitude
 
-	local atmo = self._atmo
+	local renderCenter, scale
 	if dist <= self._maxRender or dist < 1e-3 then
-		-- Close enough to draw at true scale; terrain aligns with it.
-		if self._lastDist ~= 0 then
-			ball.Size = Vector3.new(self._trueRadius * 2, self._trueRadius * 2, self._trueRadius * 2)
-			if atmo then
-				atmo.Size = Vector3.new(self._atmoRadius * 2, self._atmoRadius * 2, self._atmoRadius * 2)
-			end
-			self._lastDist = 0
-		end
-		ball.CFrame = CFrame.new(center)
-		if atmo then
-			atmo.CFrame = CFrame.new(center)
-		end
+		-- Within range: draw at true scale and position; terrain aligns with it.
+		renderCenter = center
+		scale = 1
 	else
-		-- Pull the far planet into render range, preserving its angular size.
-		local scale = self._maxRender / dist
-		local clamped = camPos + toPlanet.Unit * self._maxRender
-		local r = self._trueRadius * scale
-		ball.Size = Vector3.new(r * 2, r * 2, r * 2)
-		ball.CFrame = CFrame.new(clamped)
-		if atmo then
-			local ar = self._atmoRadius * scale
-			atmo.Size = Vector3.new(ar * 2, ar * 2, ar * 2)
-			atmo.CFrame = CFrame.new(clamped)
-		end
-		self._lastDist = dist
+		-- Pull the far body into render range, preserving its angular size.
+		scale = self._maxRender / dist
+		renderCenter = camPos + toPlanet.Unit * self._maxRender
+	end
+
+	self:_apply(self._ballMesh, self._ball, self._trueRadius * 2 * scale, renderCenter)
+	if self._atmo then
+		self:_apply(self._atmoMesh, self._atmo, self._atmoRadius * 2 * scale, renderCenter)
 	end
 end
 

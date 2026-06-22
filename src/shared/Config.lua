@@ -2,7 +2,7 @@
 	Config
 	ReplicatedStorage.Shared.Config
 
-	The planet is a grass Ball part (the always-visible LOD) wrapped in real
+	The planet is a grass mesh sphere (the always-visible LOD) wrapped in real
 	Roblox terrain laid by render distance over a fixed Perlin heightfield
 	(Shared.Planet). It sits at the world origin; the craft flies around it with
 	OrbitMechanics. Units: studs / seconds, mu in studs^3/s^2.
@@ -12,8 +12,8 @@ local Config = {}
 
 Config.BODY = {
 	name = "Terra",
-	radius = 1000, -- a real Ball part (<=1024 radius) so it never culls
-	mu = 1.5e7, -- surface gravity ~15 studs/s^2
+	radius = 3000, -- 6000 studs across; drawn as a scaled mesh sphere (PlanetRenderer)
+	mu = 1.35e8, -- surface gravity ~15 studs/s^2 (g = mu / radius^2)
 	seed = 1337,
 	grassColor = Color3.fromRGB(86, 140, 74),
 	hillColor = Color3.fromRGB(74, 124, 66),
