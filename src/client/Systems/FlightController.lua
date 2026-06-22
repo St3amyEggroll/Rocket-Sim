@@ -67,8 +67,16 @@ function FlightController:Start()
 		self:_onMode("Flight")
 	end)
 	self._input:GetStageSignal():Connect(function()
-		if self._mode:GetMode() == "Flight" then
-			self._vehicle:Stage()
+		if self._mode:GetMode() ~= "Flight" then
+			return
+		end
+		local droppedHeight = self._vehicle:Stage()
+		-- The spent stage stays where it was; shift the (now shorter) craft up along
+		-- its nose by the dropped height so the upper stage doesn't jump downward.
+		if droppedHeight and droppedHeight > 0 then
+			local n = self._attitude.LookVector
+			local p = self._state.position
+			self._state.position = Orbit.vec(p.x + n.X * droppedHeight, p.y + n.Y * droppedHeight, p.z + n.Z * droppedHeight)
 		end
 	end)
 

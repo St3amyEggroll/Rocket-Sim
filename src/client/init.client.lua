@@ -91,4 +91,4 @@ for _, name in ipairs(startOrder) do
 	end
 end
 
-print("[RocketSim] Client systems started -- build P8.2 (whole-body collision + parts blow apart on crash).")
+print("[RocketSim] Client systems started -- build P8.3 (decouplers: spent stages drop away and stay).")

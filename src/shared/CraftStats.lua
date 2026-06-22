@@ -45,7 +45,12 @@ function CraftStats.analyze(defs, surfaceGravity)
 				payloadMass += (def.mass or 0) + (def.fuel or 0)
 				stageOfPart[i] = 0
 			end
+		elseif def.category == "structure" and current then
+			-- Structure (fins, decouplers) belongs to its stage and drops with it.
+			current.dryMass += def.mass or 0
+			stageOfPart[i] = stageNum
 		else
+			-- Command pods (and anything above the bottom engine) are payload.
 			payloadMass += def.mass or 0
 			stageOfPart[i] = 0
 		end

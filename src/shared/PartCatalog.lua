@@ -89,10 +89,21 @@ PartCatalog.parts = {
 		shape = "fins",
 		drag = 0.9, -- lots of drag where they sit -> pulls the centre of pressure there
 	},
+	Decoupler = {
+		id = "Decoupler",
+		name = "Decoupler",
+		category = "structure",
+		mass = 0.15,
+		height = 1, -- a thin band; everything below it drops as a stage when fired
+		radius = 3,
+		color = Color3.fromRGB(94, 96, 104),
+		shape = "decoupler",
+		drag = 0.15,
+	},
 }
 
 -- Display order in the VAB palette.
-PartCatalog.order = { "Pod", "TankS", "TankL", "EngineMain", "EngineVac", "Fin" }
+PartCatalog.order = { "Pod", "TankS", "TankL", "EngineMain", "EngineVac", "Fin", "Decoupler" }
 
 function PartCatalog.get(id)
 	return PartCatalog.parts[id]

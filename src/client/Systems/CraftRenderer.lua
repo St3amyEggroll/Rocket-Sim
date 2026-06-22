@@ -64,12 +64,61 @@ function CraftRenderer:Start()
 	self:_buildPad()
 	self:_rebuildCraft()
 
+	-- Staged fires BEFORE Changed, so split off the spent stage from the live model
+	-- first, then let Changed rebuild the (now smaller) active craft.
+	self._vehicle.Staged:Connect(function(droppedStage)
+		self:_jettison(droppedStage)
+	end)
 	self._vehicle.Changed:Connect(function()
 		self:_rebuildCraft()
 	end)
 	Flight:GetUpdatedSignal():Connect(function(state, info)
 		self:_render(state, info)
 	end)
+end
+
+-- Split off a jettisoned stage as a free-falling spent stage that stays in the world.
+function CraftRenderer:_jettison(stage)
+	local model = self._craft
+	if not model then
+		return
+	end
+	local craftCF = model:GetPivot()
+
+	local parts = {}
+	for _, part in ipairs(model:GetDescendants()) do
+		if part:IsA("BasePart") and part:GetAttribute("stg") == stage then
+			parts[#parts + 1] = part
+		end
+	end
+	if #parts == 0 then
+		return
+	end
+
+	local spent = Instance.new("Model")
+	spent.Name = "SpentStage"
+	local primary = parts[1]
+	for _, part in ipairs(parts) do
+		part.Parent = spent -- reparent keeps world position
+		part.CanCollide = true
+		part.CanQuery = true
+		part.CastShadow = true
+		if part ~= primary then
+			local weld = Instance.new("WeldConstraint")
+			weld.Part0 = primary
+			weld.Part1 = part
+			weld.Parent = primary
+		end
+	end
+	for _, part in ipairs(parts) do
+		part.Anchored = false -- now physics debris (one welded body), gravity takes it
+	end
+	spent.PrimaryPart = primary
+	spent.Parent = Workspace
+
+	-- Carry the craft's velocity at separation, plus a gentle shove down the stack.
+	primary.AssemblyLinearVelocity = (self._lastVel or Vector3.zero) - craftCF.UpVector * 6
+	Debris:AddItem(spent, 45)
 end
 
 function CraftRenderer:_cleanupWorld()
@@ -113,7 +162,7 @@ function CraftRenderer:_buildPad()
 	})
 end
 
-function CraftRenderer:_buildFins(model, y, radius)
+function CraftRenderer:_buildFins(model, y, radius, stage)
 	local count, span, finH, thick = 4, 3.4, 4.2, 0.4
 	for i = 1, count do
 		local ang = (i - 1) * (2 * math.pi / count)
@@ -126,7 +175,7 @@ function CraftRenderer:_buildFins(model, y, radius)
 			Color = Color3.fromRGB(150, 80, 70),
 			Material = Enum.Material.Metal,
 			CFrame = CFrame.fromMatrix(pos, dir, Vector3.yAxis),
-		})
+		}):SetAttribute("stg", stage)
 	end
 end
 
@@ -134,7 +183,7 @@ function CraftRenderer:_rebuildCraft()
 	if self._craft then
 		self._craft:Destroy()
 	end
-	local parts = self._vehicle:GetActiveParts()
+	local layout = self._vehicle:GetActiveLayout()
 
 	local model = Instance.new("Model")
 	model.Name = "Craft"
@@ -144,9 +193,10 @@ function CraftRenderer:_rebuildCraft()
 	local y = 0
 	local bottomRadius = 3
 	local bottomSet = false
-	for _, def in ipairs(parts) do
+	for _, entry in ipairs(layout) do
+		local def, stage = entry.def, entry.stage
 		if def.shape == "fins" then
-			self:_buildFins(model, y, bottomSet and bottomRadius or def.radius)
+			self:_buildFins(model, y, bottomSet and bottomRadius or def.radius, stage)
 		else
 			if not bottomSet then
 				bottomRadius = def.radius
@@ -154,7 +204,7 @@ function CraftRenderer:_rebuildCraft()
 			end
 			local mat = (def.category == "engine") and Enum.Material.Metal or Enum.Material.SmoothPlastic
 			local center = y + def.height / 2
-			addCylinder(model, def.name, def.height, def.radius, def.color, mat, center)
+			addCylinder(model, def.name, def.height, def.radius, def.color, mat, center):SetAttribute("stg", stage)
 			if def.shape == "pod" then
 				makePart(model, "Dome", {
 					Shape = Enum.PartType.Ball,
@@ -162,9 +212,9 @@ function CraftRenderer:_rebuildCraft()
 					Color = def.color,
 					Material = Enum.Material.SmoothPlastic,
 					CFrame = CFrame.new(0, y + def.height, 0),
-				})
+				}):SetAttribute("stg", stage)
 			elseif def.shape == "engine" then
-				addCylinder(model, "Nozzle", def.height * 0.5, def.radius * 0.66, Color3.fromRGB(40, 42, 48), Enum.Material.Metal, y - def.height * 0.1)
+				addCylinder(model, "Nozzle", def.height * 0.5, def.radius * 0.66, Color3.fromRGB(40, 42, 48), Enum.Material.Metal, y - def.height * 0.1):SetAttribute("stg", stage)
 			end
 			y += def.height
 		end
@@ -240,6 +290,8 @@ end
 
 function CraftRenderer:_render(state, info)
 	local craftRender = self._origin:ToRender(state.position)
+	local v = state.velocity
+	self._lastVel = Vector3.new(v.x, v.y, v.z) -- separation velocity for spent stages
 
 	-- Crash = explosion: blow up once, then there's nothing left to render until relaunch.
 	if info and info.status == "Crashed" then

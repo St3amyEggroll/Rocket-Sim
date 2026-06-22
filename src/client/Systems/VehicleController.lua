@@ -23,6 +23,7 @@ local VehicleController = {}
 function VehicleController:Init()
 	self._surfaceGravity = Config.BODY.mu / (Config.BODY.radius * Config.BODY.radius)
 	self.Changed = Signal.new()
+	self.Staged = Signal.new() -- fires (droppedStageNumber) just before Changed on a stage
 
 	self._design = {}
 	for _, id in ipairs(Config.LAUNCH.defaultDesign) do
@@ -93,6 +94,20 @@ function VehicleController:GetActiveParts()
 	return out
 end
 
+-- Same as GetActiveParts but each entry carries its stage number (0 = payload),
+-- so the renderer can tag parts and split off a whole stage when it is jettisoned.
+function VehicleController:GetActiveLayout()
+	local out = {}
+	local stageOf = self._stats.stageOfPart
+	for i, def in ipairs(self._design) do
+		local st = stageOf[i] or 0
+		if st == 0 or st >= self._stageIndex then
+			out[#out + 1] = { def = def, stage = st }
+		end
+	end
+	return out
+end
+
 function VehicleController:GetCurrentMass(): number
 	local s = self._stats
 	if self._stageIndex > s.stageCount then
@@ -132,15 +147,28 @@ function VehicleController:CanStage(): boolean
 	return self._stageIndex <= self._stats.stageCount
 end
 
-function VehicleController:Stage(): boolean
-	if self._stageIndex > self._stats.stageCount then
-		return false
+-- Fire the current stage. Returns the total HEIGHT of the jettisoned parts (so the
+-- flight loop can shift the craft up by that much, keeping the upper stage in place
+-- while the spent stage drops away). Returns 0 if there was nothing to stage.
+function VehicleController:Stage(): number
+	local s = self._stats
+	if self._stageIndex > s.stageCount then
+		return 0
 	end
+	local dropped = self._stageIndex
+
+	local droppedHeight = 0
+	for i, def in ipairs(self._design) do
+		if (s.stageOfPart[i] or 0) == dropped then
+			droppedHeight += def.height or 0
+		end
+	end
+
 	self._stageIndex += 1
-	self._fuelRemaining = (self._stageIndex <= self._stats.stageCount) and self._stats.stages[self._stageIndex].fuel
-		or 0
-	self.Changed:Fire()
-	return true
+	self._fuelRemaining = (self._stageIndex <= s.stageCount) and s.stages[self._stageIndex].fuel or 0
+	self.Staged:Fire(dropped) -- renderer splits off the spent stage (uses the live model)
+	self.Changed:Fire() -- ...then everything rebuilds for the new active craft
+	return droppedHeight
 end
 
 function VehicleController:GetFuelFraction(): number
