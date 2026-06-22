@@ -74,7 +74,7 @@ function PlanetRenderer:Start()
 
 	self._ball, self._ballMesh = self:_makeSphere("Planet", Config.BODY.lodColor or Config.BODY.grassColor, Enum.Material.SmoothPlastic, 0)
 	-- Translucent atmosphere shell (purely cosmetic), drawn concentric with the body.
-	self._atmo, self._atmoMesh = self:_makeSphere("Atmosphere", Config.ATMOSPHERE.color, Enum.Material.ForceField, 0.55)
+	self._atmo, self._atmoMesh = self:_makeSphere("Atmosphere", Config.ATMOSPHERE.color, Enum.Material.ForceField, 0.5)
 
 	-- Update after the camera has been positioned for this frame.
 	RunService:BindToRenderStep("RocketSim_Planet", Enum.RenderPriority.Camera.Value + 2, function()
@@ -104,7 +104,7 @@ function PlanetRenderer:_update()
 		return
 	elseif self._ball.Transparency ~= 0 then
 		self._ball.Transparency = 0
-		self._atmo.Transparency = 0.55
+		self._atmo.Transparency = 0.5
 	end
 
 	local center = self._origin:ToRender(Orbit.vec(0, 0, 0))

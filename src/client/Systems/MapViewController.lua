@@ -120,7 +120,7 @@ function MapViewController:_buildPool()
 	planet.CanTouch = false
 	planet.CastShadow = false
 	planet.Size = Vector3.new(2048, 2048, 2048)
-	planet.Color = Config.BODY.grassColor
+	planet.Color = Config.BODY.lodColor or Config.BODY.grassColor
 	planet.Material = Enum.Material.SmoothPlastic
 	planet.Parent = folder
 	local pmesh = Instance.new("SpecialMesh")

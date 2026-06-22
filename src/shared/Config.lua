@@ -17,7 +17,7 @@ Config.BODY = {
 	seed = 1337,
 	grassColor = Color3.fromRGB(86, 140, 74),
 	hillColor = Color3.fromRGB(74, 124, 66),
-	lodColor = Color3.fromRGB(66, 104, 116), -- distant body tint (ocean + land blend)
+	lodColor = Color3.fromRGB(56, 102, 146), -- distant ocean-blue tint (reads as a world from space)
 }
 
 -- Render-distance terrain. The planet's surface is a single deterministic Perlin
@@ -77,7 +77,7 @@ Config.ATMOSPHERE = {
 	reentryQ = 8000, -- densityFrac*speed^2 above this begins reentry heating FX
 	maxReentryQ = 40000, -- ...and it saturates here
 	momentScale = 1.4, -- multiplier on aerodynamic torque (flip aggressiveness)
-	color = Color3.fromRGB(120, 170, 255), -- atmosphere haze tint
+	color = Color3.fromRGB(135, 182, 255), -- atmosphere haze / limb glow (softens the body silhouette)
 }
 
 -- Sky. The world transitions from a bright blue Earth-like sky in the atmosphere to
