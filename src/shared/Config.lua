@@ -39,7 +39,7 @@ Config.TERRAIN = {
 
 Config.FLIGHT = {
 	maxDt = 0.1,
-	landSpeed = 32, -- touchdown faster than this (studs/s) counts as a crash
+	crashSpeed = 10, -- touchdown faster than this (studs/s) destroys the craft
 }
 
 -- Atmosphere: an exponential air layer that produces aerodynamic drag (an extra
@@ -63,7 +63,7 @@ Config.CRAFT = {
 }
 
 Config.LAUNCH = {
-	defaultDesign = { "EngineMain", "Fin", "LandingLegs", "TankL", "TankL", "Pod" }, -- bottom -> top
+	defaultDesign = { "EngineMain", "Fin", "TankL", "TankL", "Pod" }, -- bottom -> top
 	turnStartAlt = 150,
 	turnEndAlt = 1200,
 }
@@ -81,31 +81,6 @@ Config.CONTROL = {
 	aeroDamp = 0.6, -- passive aerodynamic pitch damping per unit air density
 	maxOmega = 12, -- rad/s angular-velocity safety cap
 }
-
--- Landing legs (cosmetic + define a wide, stable support base for landing).
-Config.LEGS = {
-	count = 3,
-	standHeight = 5, -- the craft base rests this high on the legs
-	spread = 2.2, -- foot horizontal distance from the axis = bottomRadius * spread
-	thickness = 0.7,
-	footRadius = 1.1,
-	color = Color3.fromRGB(70, 74, 84),
-}
-
--- Touchdown rules. A landing is clean only if the craft is upright enough, slow
--- enough sideways, and on gentle enough ground. Landing legs make all of these far
--- more forgiving; without legs the craft tips easily (KSP-style). A failed landing
--- tips the craft over and flags Crashed.
-Config.LANDING = {
-	tipDuration = 1.1, -- seconds for the tip-over animation
-	maxTiltLegs = math.rad(35), -- nose tilt from vertical allowed at touchdown (with legs)
-	maxHorizLegs = 18, -- horizontal speed allowed (studs/s)
-	maxSlopeLegs = math.rad(22), -- ground slope allowed
-	maxTiltBare = math.rad(12), -- much tippier without legs
-	maxHorizBare = 6,
-	maxSlopeBare = math.rad(8),
-}
-
 Config.FLOATING_ORIGIN = {
 	rebaseThreshold = 1e9, -- the world is small; never rebase (terrain is fixed)
 }

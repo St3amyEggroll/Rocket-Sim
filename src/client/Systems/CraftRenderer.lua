@@ -112,34 +112,6 @@ function CraftRenderer:_buildPad()
 	})
 end
 
-function CraftRenderer:_buildLegs(model, bottomRadius)
-	local L = require(Shared:WaitForChild("Config")).LEGS
-	local footY = -L.standHeight
-	local footR = bottomRadius * L.spread
-	for i = 1, L.count do
-		local ang = (i - 1) * (2 * math.pi / L.count)
-		local dir = Vector3.new(math.cos(ang), 0, math.sin(ang))
-		local top = Vector3.new(0, bottomRadius * 0.35, 0)
-		local foot = Vector3.new(dir.X * footR, footY, dir.Z * footR)
-		local mid = (top + foot) * 0.5
-		local len = (foot - top).Magnitude
-		makePart(model, "Leg" .. i, {
-			Shape = Enum.PartType.Block,
-			Size = Vector3.new(L.thickness, len, L.thickness),
-			Color = L.color,
-			Material = Enum.Material.Metal,
-			CFrame = CFrame.lookAt(mid, foot) * CFrame.Angles(math.rad(90), 0, 0),
-		})
-		makePart(model, "Foot" .. i, {
-			Shape = Enum.PartType.Ball,
-			Size = Vector3.new(L.footRadius * 2, L.footRadius * 2, L.footRadius * 2),
-			Color = L.color,
-			Material = Enum.Material.Metal,
-			CFrame = CFrame.new(foot),
-		})
-	end
-end
-
 function CraftRenderer:_buildFins(model, y, radius)
 	local count, span, finH, thick = 4, 3.4, 4.2, 0.4
 	for i = 1, count do
@@ -171,11 +143,8 @@ function CraftRenderer:_rebuildCraft()
 	local y = 0
 	local bottomRadius = 3
 	local bottomSet = false
-	local hasLegs = false
 	for _, def in ipairs(parts) do
-		if def.shape == "legs" then
-			hasLegs = true
-		elseif def.shape == "fins" then
+		if def.shape == "fins" then
 			self:_buildFins(model, y, bottomSet and bottomRadius or def.radius)
 		else
 			if not bottomSet then
@@ -198,10 +167,6 @@ function CraftRenderer:_rebuildCraft()
 			end
 			y += def.height
 		end
-	end
-
-	if hasLegs then
-		self:_buildLegs(model, bottomRadius)
 	end
 
 	local flame = makePart(model, "Flame", {
@@ -236,10 +201,38 @@ function CraftRenderer:_rebuildCraft()
 	self._flame = flame
 	self._flameLight = light
 	self._reentryGlow = glow
+	self._exploded = false
+end
+
+-- Blow the craft apart on a crash (impact over the crash speed).
+function CraftRenderer:_explode(at)
+	local ex = Instance.new("Explosion")
+	ex.Position = at
+	ex.BlastRadius = 28
+	ex.BlastPressure = 0 -- visual only; physics is ours, not Roblox's
+	ex.DestroyJointsOnExplode = false
+	ex.Parent = Workspace
+	if self._craft then
+		self._craft:Destroy()
+		self._craft = nil
+	end
 end
 
 function CraftRenderer:_render(state, info)
 	local craftRender = self._origin:ToRender(state.position)
+
+	-- Crash = explosion: blow up once, then there's nothing left to render until relaunch.
+	if info and info.status == "Crashed" then
+		if not self._exploded then
+			self._exploded = true
+			self:_explode(craftRender)
+		end
+		return
+	end
+	if not self._craft then
+		return
+	end
+
 	local pd = info and info.pointDir or Orbit.vec(0, 1, 0)
 	local up = Vector3.new(pd.x or pd.X, pd.y or pd.Y, pd.z or pd.Z)
 	self._craft:PivotTo(pointCFrame(craftRender, up))

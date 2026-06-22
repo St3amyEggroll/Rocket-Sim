@@ -174,15 +174,6 @@ function VehicleController:GetHeight(): number
 	return h
 end
 
-function VehicleController:HasLegs(): boolean
-	for _, def in ipairs(self:GetActiveParts()) do
-		if def.shape == "legs" then
-			return true
-		end
-	end
-	return false
-end
-
 -- Summed aerodynamic drag area of the active parts (used by the atmosphere model).
 function VehicleController:GetDragArea(): number
 	local a = 0
