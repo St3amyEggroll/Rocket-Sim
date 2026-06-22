@@ -93,4 +93,4 @@ for _, name in ipairs(startOrder) do
 	end
 end
 
-print("[RocketSim] Client systems started -- build P10.0 (smooth biome terrain: plains/ocean/mountain/desert/cold).")
+print("[RocketSim] Client systems started -- build P10.1 (detailed LOD planet: biome continents, ice caps, clouds; detailed map).")

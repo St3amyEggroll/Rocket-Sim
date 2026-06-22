@@ -16,6 +16,7 @@ local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Orbit = require(Shared:WaitForChild("OrbitMechanics"))
 local Config = require(Shared:WaitForChild("Config"))
 local Registry = require(Shared:WaitForChild("Registry"))
+local BiomeSphere = require(Shared:WaitForChild("BiomeSphere"))
 
 local MapViewController = {}
 
@@ -120,7 +121,7 @@ function MapViewController:_buildPool()
 	planet.CanTouch = false
 	planet.CastShadow = false
 	planet.Size = Vector3.new(2048, 2048, 2048)
-	planet.Color = Config.BODY.grassColor
+	planet.Color = Config.BODY.lodColor or Config.BODY.grassColor -- ocean base
 	planet.Material = Enum.Material.SmoothPlastic
 	planet.Parent = folder
 	local pmesh = Instance.new("SpecialMesh")
@@ -128,6 +129,7 @@ function MapViewController:_buildPool()
 	pmesh.Parent = planet
 	self._mapPlanet = planet
 	self._mapPlanetMesh = pmesh
+	self._mapTileRadius = 0 -- last radius the biome tiles were built at
 end
 
 function MapViewController:_setVisible(v)
@@ -139,6 +141,9 @@ function MapViewController:_setVisible(v)
 	self._periMarker.Transparency = v and 0 or 1
 	self._craftMarker.Transparency = v and 0 or 1
 	self._mapPlanet.Transparency = v and 0 or 1
+	if self._mapTiles then
+		self._mapTiles.Parent = v and Workspace or nil
+	end
 end
 
 function MapViewController:_recompute(state)
@@ -206,10 +211,24 @@ function MapViewController:_update(state, info)
 	local mk = self._bodyRadius * s * 0.08
 
 	-- Compressed body sphere at the focus (sea-level radius * scale).
-	local pd = self._bodyRadius * s * 2
+	local mapRadius = self._bodyRadius * s
+	local pd = mapRadius * 2
 	local psc = pd / 2048
 	self._mapPlanetMesh.Scale = Vector3.new(psc, psc, psc)
 	self._mapPlanet.CFrame = CFrame.new(focus)
+
+	-- Continents/ice/deserts on the compressed body. Rebuilding the tiles is costly, so
+	-- only rebuild when the map scale has moved the radius by >8% (zoom steps), then just
+	-- re-place it each frame to track the focus.
+	if (not self._mapTiles) or math.abs(mapRadius - self._mapTileRadius) > self._mapTileRadius * 0.08 then
+		if self._mapTiles then
+			self._mapTiles:Destroy()
+		end
+		self._mapTiles = BiomeSphere.buildTiles(mapRadius, 12, 24)
+		self._mapTileRadius = mapRadius
+		self._mapTiles.Parent = Workspace
+	end
+	self._mapTiles:PivotTo(CFrame.new(focus))
 
 	-- Orbit line; segments below the surface go red (impact warning).
 	local pts = self._simPath
