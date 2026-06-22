@@ -140,6 +140,23 @@ function CraftRenderer:_buildLegs(model, bottomRadius)
 	end
 end
 
+function CraftRenderer:_buildFins(model, y, radius)
+	local count, span, finH, thick = 4, 3.4, 4.2, 0.4
+	for i = 1, count do
+		local ang = (i - 1) * (2 * math.pi / count)
+		local dir = Vector3.new(math.cos(ang), 0, math.sin(ang))
+		local pos = dir * (radius + span * 0.5 - 0.6) + Vector3.new(0, y, 0)
+		makePart(model, "Fin" .. i, {
+			Shape = Enum.PartType.Block,
+			-- X = radial span, Y = vertical, Z = thickness (tangential).
+			Size = Vector3.new(span, finH, thick),
+			Color = Color3.fromRGB(150, 80, 70),
+			Material = Enum.Material.Metal,
+			CFrame = CFrame.fromMatrix(pos, dir, Vector3.yAxis),
+		})
+	end
+end
+
 function CraftRenderer:_rebuildCraft()
 	if self._craft then
 		self._craft:Destroy()
@@ -158,6 +175,8 @@ function CraftRenderer:_rebuildCraft()
 	for _, def in ipairs(parts) do
 		if def.shape == "legs" then
 			hasLegs = true
+		elseif def.shape == "fins" then
+			self:_buildFins(model, y, bottomSet and bottomRadius or def.radius)
 		else
 			if not bottomSet then
 				bottomRadius = def.radius

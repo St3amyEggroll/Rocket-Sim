@@ -109,4 +109,11 @@ the craft `LANDED`s; `3` (RadialOut) + Shift to lift off again.
 - **Phase 7 (done):** atmosphere -- exponential air density driving aerodynamic drag
   via the `extraAccel` hook and reentry heating. Inside the air, flight is integrated
   numerically and time warp is pinned to 1x; above it, coasting is back on rails.
+  Bigger planet (6000 studs) drawn as a scaled mesh sphere; KSP-style VAB + a
+  revert / back-to-launch menu and crash overlay.
+- **Phase 8 (done):** rigid-body attitude. The craft has angular velocity + moment
+  of inertia; control torque (weak reaction wheels + engine gimbal) and AERODYNAMIC
+  torque (drag at the centre of pressure vs centre of mass) spin it -- so stable
+  rockets weathervane prograde and unstable ones flip. Fins move the CoP back; the
+  VAB shows a CoM/CoP stability margin.
 - **Next:** second body (moon), sphere-of-influence transitions, maneuver nodes.

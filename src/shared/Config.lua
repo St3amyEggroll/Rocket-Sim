@@ -53,6 +53,7 @@ Config.ATMOSPHERE = {
 	dragCoeff = 0.008, -- drag accel = dragCoeff * densityFrac * speed^2 * dragArea / mass
 	reentryQ = 1800, -- densityFrac*speed^2 above this begins reentry heating FX
 	maxReentryQ = 9000, -- ...and it saturates here
+	momentScale = 1.4, -- multiplier on aerodynamic torque (flip aggressiveness)
 	color = Color3.fromRGB(120, 170, 255), -- atmosphere haze tint
 }
 
@@ -62,16 +63,23 @@ Config.CRAFT = {
 }
 
 Config.LAUNCH = {
-	defaultDesign = { "EngineMain", "LandingLegs", "TankL", "TankL", "Pod" }, -- bottom -> top
+	defaultDesign = { "EngineMain", "Fin", "LandingLegs", "TankL", "TankL", "Pod" }, -- bottom -> top
 	turnStartAlt = 150,
 	turnEndAlt = 1200,
 }
 
+-- Attitude is now a real rigid-body rotation: the craft has angular velocity and a
+-- moment of inertia, and torques (reaction wheels + engine gimbal for control,
+-- aerodynamics for stability) spin it. Reaction-wheel authority is deliberately
+-- weak (KSP-hardcore): an aerodynamically unstable rocket WILL flip and must be
+-- fixed with fins / weight, not muscled straight.
 Config.CONTROL = {
-	pitchRate = 1.3,
-	yawRate = 1.3,
-	rollRate = 2.0,
-	sasSlew = 3.0,
+	reactionWheelAccel = 0.35, -- rad/s^2 of control authority from reaction wheels
+	gimbalAccel = 0.7, -- + this * throttle of authority while the engine is burning
+	sasKp = 5.0, -- SAS pointing stiffness (toward the selected marker)
+	sasKd = 3.0, -- SAS rate damping
+	aeroDamp = 0.6, -- passive aerodynamic pitch damping per unit air density
+	maxOmega = 12, -- rad/s angular-velocity safety cap
 }
 
 -- Landing legs (cosmetic + define a wide, stable support base for landing).

@@ -326,9 +326,20 @@ function VABController:_buildStats(root)
 	sub.Text = "total delta-v (studs/s)"
 	sub.Parent = pane
 
+	self._stabLabel = Instance.new("TextLabel")
+	self._stabLabel.Position = UDim2.fromOffset(14, 106)
+	self._stabLabel.Size = UDim2.new(1, -28, 0, 20)
+	self._stabLabel.BackgroundTransparency = 1
+	self._stabLabel.Font = Enum.Font.GothamBold
+	self._stabLabel.TextSize = 14
+	self._stabLabel.TextXAlignment = Enum.TextXAlignment.Left
+	self._stabLabel.TextColor3 = TEXT
+	self._stabLabel.Text = ""
+	self._stabLabel.Parent = pane
+
 	self._statsLabel = Instance.new("TextLabel")
-	self._statsLabel.Position = UDim2.fromOffset(14, 112)
-	self._statsLabel.Size = UDim2.new(1, -28, 1, -124)
+	self._statsLabel.Position = UDim2.fromOffset(14, 132)
+	self._statsLabel.Size = UDim2.new(1, -28, 1, -144)
 	self._statsLabel.BackgroundTransparency = 1
 	self._statsLabel.Font = Enum.Font.Code
 	self._statsLabel.TextSize = 14
@@ -458,6 +469,17 @@ function VABController:_refresh()
 			self._vehicle:RemovePart(displayPos)
 		end)
 		table.insert(self._rows, row)
+	end
+
+	-- Aerodynamic stability (CoP behind CoM = stable; fins at the tail help).
+	local prof = self._vehicle:GetRotProfile()
+	if prof.mass > 0 then
+		local stable = prof.margin > 0
+		self._stabLabel.Text = string.format("Stability: %s  (%.1f)", stable and "STABLE" or "UNSTABLE", prof.margin)
+		self._stabLabel.TextColor3 = stable and Color3.fromRGB(110, 220, 130) or Color3.fromRGB(230, 110, 100)
+	else
+		self._stabLabel.Text = "Stability: --"
+		self._stabLabel.TextColor3 = DIM
 	end
 
 	-- Stats.

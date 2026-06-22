@@ -192,6 +192,49 @@ function VehicleController:GetDragArea(): number
 	return a
 end
 
+-- Rotational profile of the active stack, measured along the body axis from the
+-- base (+y = toward the nose). Used for rigid-body attitude + aero stability:
+--   com     = centre of mass (y)
+--   cop     = centre of pressure (drag-weighted y)
+--   inertia = pitch/yaw moment of inertia about the CoM (sum m * (y-com)^2)
+--   margin  = com - cop  (>0 = aerodynamically STABLE; CoP behind CoM)
+-- Masses use the wet part masses (a fixed, representative distribution); the slow
+-- CoM drift as fuel burns is not modelled yet.
+function VehicleController:GetRotProfile()
+	local y = 0
+	local totalM, sumMY, sumDrag, sumDragY = 0, 0, 0, 0
+	local items = {}
+	for _, def in ipairs(self:GetActiveParts()) do
+		local cy = y + (def.height or 0) * 0.5
+		local m = (def.mass or 0) + (def.fuel or 0)
+		local drag = def.drag or 0
+		items[#items + 1] = { y = cy, m = m }
+		totalM += m
+		sumMY += m * cy
+		sumDrag += drag
+		sumDragY += drag * cy
+		y += def.height or 0
+	end
+
+	local com = (totalM > 0) and (sumMY / totalM) or 0
+	local cop = (sumDrag > 0) and (sumDragY / sumDrag) or com
+	local inertia = 0
+	for _, it in ipairs(items) do
+		local d = it.y - com
+		inertia += it.m * d * d
+	end
+	inertia = math.max(inertia, math.max(totalM, 1) * 1.5) -- floor so single parts aren't twitchy
+
+	return {
+		com = com,
+		cop = cop,
+		inertia = inertia,
+		margin = com - cop,
+		length = y,
+		mass = totalM,
+	}
+end
+
 function VehicleController:GetTelemetry(throttle)
 	return {
 		mass = self:GetCurrentMass(),

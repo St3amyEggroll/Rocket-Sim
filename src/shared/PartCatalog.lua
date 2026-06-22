@@ -89,10 +89,21 @@ PartCatalog.parts = {
 		shape = "legs",
 		drag = 0.1,
 	},
+	Fin = {
+		id = "Fin",
+		name = "Tail Fins",
+		category = "structure",
+		mass = 0.2,
+		height = 0, -- blades wrap the body at wherever they sit in the stack
+		radius = 3,
+		color = Color3.fromRGB(150, 80, 70),
+		shape = "fins",
+		drag = 0.9, -- lots of drag where they sit -> pulls the centre of pressure there
+	},
 }
 
 -- Display order in the VAB palette.
-PartCatalog.order = { "Pod", "TankS", "TankL", "EngineMain", "EngineVac", "LandingLegs" }
+PartCatalog.order = { "Pod", "TankS", "TankL", "EngineMain", "EngineVac", "LandingLegs", "Fin" }
 
 function PartCatalog.get(id)
 	return PartCatalog.parts[id]

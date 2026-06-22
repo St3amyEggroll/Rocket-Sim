@@ -3,10 +3,13 @@
 	Owner of: the craft's sim State, its attitude (orientation), the active body,
 	and flight status. Drives the master per-frame loop.
 
-	Attitude is manual (WASD/QE) or auto-oriented (SAS: 1-5). Thrust always fires
-	along the nose (attitude.LookVector). VAB mode holds the craft on the pad;
-	Flight mode lets it fly. Engine off coasts (propagate, warp-scaled); thrust on
-	integrates (real dt) using the built rocket's thrust/mass, burning fuel.
+	Attitude is a real rigid-body rotation (_omega = angular velocity, integrated
+	from torques against the craft's moment of inertia): control torque from weak
+	reaction wheels + engine gimbal (WASD/QE, or SAS modes 1-5) and AERODYNAMIC
+	torque from drag at the centre of pressure -- so an unstable rocket weathervanes
+	or flips for real. Thrust fires along the nose (attitude.LookVector). Engine off
+	coasts (propagate, warp-scaled, vacuum only); in air or under thrust it integrates
+	(real dt) gravity + thrust + drag, burning fuel.
 ]]
 
 local RunService = game:GetService("RunService")
@@ -41,6 +44,7 @@ function FlightController:Init()
 	-- Nose points radial-out (+Y).
 	self._state = { position = Orbit.vec(0, self._launchRadius, 0), velocity = Orbit.vec(0, 0, 0) }
 	self._attitude = CFrame.lookAt(Vector3.zero, Vector3.yAxis, Vector3.xAxis)
+	self._omega = Vector3.zero -- angular velocity (world frame, rad/s)
 	self._status = "VAB"
 	self._powered = false
 	self._landed = true
@@ -83,6 +87,7 @@ function FlightController:_onMode(mode)
 	local stand = self._vehicle:HasLegs() and Config.LEGS.standHeight or 0
 	self._state = { position = Orbit.vec(0, self._launchRadius + stand, 0), velocity = Orbit.vec(0, 0, 0) }
 	self._attitude = CFrame.lookAt(Vector3.zero, Vector3.yAxis, Vector3.xAxis)
+	self._omega = Vector3.zero
 	self._landed = true
 	self._crashed = false
 	self._tipping = false
@@ -128,30 +133,74 @@ function FlightController:_sasTarget(sas, pos, vel)
 	return nil
 end
 
-function FlightController:_updateAttitude(dt, pos, vel)
+-- Rigid-body attitude: integrate angular velocity (self._omega) under control torque
+-- (reaction wheels + engine gimbal) and aerodynamic torque (drag at the centre of
+-- pressure about the centre of mass), then rotate the attitude by it. Returns the
+-- active SAS mode for display.
+function FlightController:_updateRotation(dt, pos, vel, powered, throttle)
+	local C = Config.CONTROL
+	local prof = self._vehicle:GetRotProfile()
+	local I = prof.inertia
+
 	local pitch, yaw, roll = self._input:GetAttitudeInput() -- may switch SAS to Manual
 	local sas = self._input:GetSAS()
-	local C = Config.CONTROL
 
+	local right = self._attitude.RightVector
+	local up = self._attitude.UpVector
+	local look = self._attitude.LookVector
+
+	-- Control authority (rad/s^2): weak reaction wheels, plus gimbal while burning.
+	local authority = C.reactionWheelAccel + (powered and (C.gimbalAccel * throttle) or 0)
+
+	local accel = Vector3.zero
 	if sas == "Manual" then
-		self._attitude = self._attitude
-			* CFrame.Angles(pitch * C.pitchRate * dt, yaw * C.yawRate * dt, roll * C.rollRate * dt)
+		-- Direct stick torque about the body axes (pitch/yaw/roll).
+		accel = (right * pitch + up * yaw - look * roll) * authority
 	else
 		local target = self:_sasTarget(sas, pos, vel)
 		if target and target.Magnitude > 1e-3 then
-			target = target.Unit
-			local up = Vector3.new(pos.x, pos.y, pos.z)
-			up = (up.Magnitude > 1e-3) and up.Unit or Vector3.yAxis
-			if math.abs(target:Dot(up)) > 0.99 then
-				up = target:Cross(Vector3.xAxis)
-				if up.Magnitude < 1e-3 then
-					up = target:Cross(Vector3.zAxis)
-				end
-				up = up.Unit
+			-- PD toward the marker direction: stiffness * error-axis - rate damping.
+			local tdir = target.Unit
+			local errAxis = look:Cross(tdir) -- axis turning nose -> target, |.| = sin(err)
+			if look:Dot(tdir) < 0 and errAxis.Magnitude < 0.05 then
+				errAxis = up -- pointing ~180 deg away: pick any perpendicular to start the turn
 			end
-			local targetCF = CFrame.lookAt(Vector3.zero, target, up)
-			self._attitude = self._attitude:Lerp(targetCF, math.clamp(C.sasSlew * dt, 0, 1))
+			accel = errAxis * C.sasKp - self._omega * C.sasKd
+			if accel.Magnitude > authority then
+				accel = accel.Unit * authority
+			end
 		end
+	end
+
+	-- Aerodynamic torque: drag acts at the centre of pressure, offset from the centre
+	-- of mass along the nose. Behind CoM (margin > 0) -> weathervanes prograde; ahead
+	-- -> flips. Plus passive air damping that grows with density.
+	local A = Config.ATMOSPHERE
+	local r = math.sqrt(pos.x * pos.x + pos.y * pos.y + pos.z * pos.z)
+	local alt = r - self._bodyRadius
+	if alt < A.top then
+		local rho = math.exp(-math.max(alt, 0) / A.scaleHeight)
+		local speed = math.sqrt(vel.x * vel.x + vel.y * vel.y + vel.z * vel.z)
+		if speed > 1e-3 then
+			local vdir = Vector3.new(vel.x, vel.y, vel.z) / speed
+			local fMag = A.dragCoeff * self._vehicle:GetDragArea() * rho * speed * speed -- aero force
+			local fDrag = vdir * (-fMag)
+			local rCoP = look * (prof.cop - prof.com) -- CoM -> CoP, along the nose
+			local torque = rCoP:Cross(fDrag)
+			accel += torque * (A.momentScale / I)
+		end
+		accel -= self._omega * (C.aeroDamp * rho) -- passive pitch damping
+	end
+
+	local omega = self._omega + accel * dt
+	if omega.Magnitude > C.maxOmega then
+		omega = omega.Unit * C.maxOmega
+	end
+	self._omega = omega
+
+	local w = omega.Magnitude
+	if w > 1e-6 then
+		self._attitude = CFrame.fromAxisAngle(omega / w, w * dt) * self._attitude
 	end
 	return sas
 end
@@ -214,9 +263,8 @@ function FlightController:_step(rawDt)
 	local throttle = self._input:GetThrottle()
 	local warp = self._input:GetTimeWarp()
 
-	local sas = self:_updateAttitude(dt, pos, self._state.velocity)
-	local nose = self._attitude.LookVector
 	local powered = false
+	local sas
 
 	-- Are we in air? (drag + reentry live here, and warp is pinned to 1x.)
 	local A = Config.ATMOSPHERE
@@ -227,9 +275,13 @@ function FlightController:_step(rawDt)
 
 	if self._landed and throttle <= 0 then
 		self._status = "Landed"
+		self._omega = Vector3.zero -- sitting on the pad: no tumble
+		sas = self._input:GetSAS()
 	else
 		local thrustAccel = self._vehicle:GetThrustAccel(throttle)
 		powered = throttle > 0 and thrustAccel > 0
+		sas = self:_updateRotation(dt, pos, self._state.velocity, powered, throttle)
+		local nose = self._attitude.LookVector
 
 		if powered or inAtmo then
 			-- Thrust and drag are not conic forces, so integrate numerically; this
@@ -282,6 +334,7 @@ function FlightController:_step(rawDt)
 
 	self._powered = powered
 	self._origin:UpdateFor(self._state.position)
+	local nose = self._attitude.LookVector
 	self:_fire({
 		pointDir = nose,
 		dt = dt,
