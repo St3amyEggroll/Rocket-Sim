@@ -29,15 +29,8 @@ local Orbit = require(Shared:WaitForChild("OrbitMechanics"))
 local Config = require(Shared:WaitForChild("Config"))
 local Registry = require(Shared:WaitForChild("Registry"))
 local Planet = require(Shared:WaitForChild("Planet"))
-local BiomeSphere = require(Shared:WaitForChild("BiomeSphere"))
 
 local PlanetRenderer = {}
-
--- LOD biome-tile + cloud detail (Low setting). Grids kept coarse for performance.
-local TILE_LAT, TILE_LON = 16, 32
-local CLOUD_LAT, CLOUD_LON = 14, 28
-local CLOUD_HEIGHT = 150 -- studs above sea level for the cloud layer
-local CLOUD_SPIN = 0.015 -- rad/s drift
 
 -- Part collision-box size for the mesh spheres: as large as the part cap allows, so
 -- the body resists distance-culling out to low orbit. The visible size is driven
@@ -79,69 +72,14 @@ function PlanetRenderer:Start()
 	self._origin = Registry:Get("FloatingOriginController")
 	self._input = Registry:Get("InputController")
 
-	-- Base ocean sphere (continents are drawn on top as biome tiles).
 	self._ball, self._ballMesh = self:_makeSphere("Planet", Config.BODY.lodColor or Config.BODY.grassColor, Enum.Material.SmoothPlastic, 0)
 	-- Translucent atmosphere shell (purely cosmetic), drawn concentric with the body.
 	self._atmo, self._atmoMesh = self:_makeSphere("Atmosphere", Config.ATMOSPHERE.color, Enum.Material.ForceField, 0.55)
-
-	-- Biome land tiles + cloud layer, drawn at true scale at the origin and shown only
-	-- when reasonably close (within maxRender); far away the plain ocean ball stands in.
-	self._tiles = BiomeSphere.buildTiles(self._trueRadius, TILE_LAT, TILE_LON)
-	self._tiles.Parent = nil
-	self._clouds = self:_buildClouds()
-	self._clouds.Parent = nil
-	self._detailOn = false
 
 	-- Update after the camera has been positioned for this frame.
 	RunService:BindToRenderStep("RocketSim_Planet", Enum.RenderPriority.Camera.Value + 2, function()
 		self:_update()
 	end)
-end
-
-function PlanetRenderer:_buildClouds()
-	local model = Instance.new("Model")
-	model.Name = "Clouds"
-	local anchor = Instance.new("Part")
-	anchor.Name = "Anchor"
-	anchor.Size = Vector3.new(1, 1, 1)
-	anchor.Transparency = 1
-	anchor.Anchored = true
-	anchor.CanCollide = false
-	anchor.CanQuery = false
-	anchor.CanTouch = false
-	anchor.CastShadow = false
-	anchor.CFrame = CFrame.new(0, 0, 0)
-	anchor.Parent = model
-	model.PrimaryPart = anchor
-
-	local radius = Config.BODY.radius + CLOUD_HEIGHT
-	local latArc = radius * (math.pi / CLOUD_LAT)
-	for i = 0, CLOUD_LAT - 1 do
-		local theta = (i + 0.5) / CLOUD_LAT * math.pi
-		local st, ct = math.sin(theta), math.cos(theta)
-		for j = 0, CLOUD_LON - 1 do
-			local phi = (j + 0.5) / CLOUD_LON * 2 * math.pi
-			local sp, cp = math.sin(phi), math.cos(phi)
-			local dir = Vector3.new(st * cp, ct, st * sp)
-			if Planet.cloudAt(dir.X, dir.Y, dir.Z) > Config.BIOMES.cloudCover then
-				local lonArc = math.max(radius * st * (2 * math.pi / CLOUD_LON), latArc * 0.5)
-				local east = Vector3.new(-sp, 0, cp)
-				local tile = Instance.new("Part")
-				tile.Anchored = true
-				tile.CanCollide = false
-				tile.CanQuery = false
-				tile.CanTouch = false
-				tile.CastShadow = false
-				tile.Material = Enum.Material.SmoothPlastic
-				tile.Color = Color3.fromRGB(245, 248, 252)
-				tile.Transparency = 0.35
-				tile.Size = Vector3.new(lonArc * 1.25, 2, latArc * 1.25)
-				tile.CFrame = CFrame.fromMatrix(dir * radius, east, dir)
-				tile.Parent = model
-			end
-		end
-	end
-	return model
 end
 
 -- Size a mesh sphere to a rendered DIAMETER and place its centre.
@@ -151,29 +89,14 @@ function PlanetRenderer:_apply(mesh, part, diameter, center)
 	part.CFrame = CFrame.new(center)
 end
 
-function PlanetRenderer:_setDetail(on)
-	if on == self._detailOn then
-		return
-	end
-	self._detailOn = on
-	self._tiles.Parent = on and Workspace or nil
-	self._clouds.Parent = on and Workspace or nil
-end
-
 function PlanetRenderer:_update()
 	local cam = Workspace.CurrentCamera
 	if not cam or not self._ball then
 		return
 	end
 
-	local center = self._origin:ToRender(Orbit.vec(0, 0, 0))
-	local camPos = cam.CFrame.Position
-	local toPlanet = center - camPos
-	local dist = toPlanet.Magnitude
-
 	-- Map view draws its own compressed body (MapViewController); hide the real one.
 	if self._input:GetMapMode() then
-		self:_setDetail(false)
 		if self._ball.Transparency ~= 1 then
 			self._ball.Transparency = 1
 			self._atmo.Transparency = 1
@@ -184,19 +107,20 @@ function PlanetRenderer:_update()
 		self._atmo.Transparency = 0.55
 	end
 
+	local center = self._origin:ToRender(Orbit.vec(0, 0, 0))
+	local camPos = cam.CFrame.Position
+	local toPlanet = center - camPos
+	local dist = toPlanet.Magnitude
+
 	local renderCenter, scale
 	if dist <= self._maxRender or dist < 1e-3 then
 		-- Within range: draw at true scale and position; terrain aligns with it.
 		renderCenter = center
 		scale = 1
-		self:_setDetail(true)
-		self._tiles:PivotTo(CFrame.new(center))
-		self._clouds:PivotTo(CFrame.new(center) * CFrame.Angles(0, os.clock() * CLOUD_SPIN, 0))
 	else
 		-- Pull the far body into render range, preserving its angular size.
 		scale = self._maxRender / dist
 		renderCenter = camPos + toPlanet.Unit * self._maxRender
-		self:_setDetail(false) -- too far for tiles; the plain ball stands in
 	end
 
 	self:_apply(self._ballMesh, self._ball, self._trueRadius * 2 * scale, renderCenter)

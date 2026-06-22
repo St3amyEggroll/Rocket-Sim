@@ -32,15 +32,6 @@ local ROCK = Enum.Material.Rock
 local SNOW = Enum.Material.Snow
 local WATER = Enum.Material.Water
 
--- Colours for the distant (LOD) view, keyed by biome material.
-local OCEAN_COLOR = Color3.fromRGB(38, 86, 138)
-local MAT_COLOR = {
-	[GRASS] = Color3.fromRGB(86, 140, 74),
-	[SAND] = Color3.fromRGB(208, 188, 128),
-	[SNOW] = Color3.fromRGB(236, 240, 245),
-	[ROCK] = Color3.fromRGB(108, 104, 98),
-}
-
 -- Layered (fractal) Perlin in [-1, 1]-ish.
 local function fbm(x, y, z, octaves, freq)
 	local sum, amp, f, norm = 0, 1, freq, 0
@@ -61,19 +52,8 @@ function Planet.sample(ux: number, uy: number, uz: number): (number, Enum.Materi
 	local temp = noise(x * B.tempFreq + 53.3, y * B.tempFreq + 17.1, z * B.tempFreq + 91.7)
 	local detail = fbm(x, y, z, 3, B.detailFreq)
 
-	-- Cold concentrates toward the poles -> ice caps (both poles), so latitude pulls
-	-- the temperature down. effTemp drives the temperate-land split.
-	local lat = math.abs(uy) -- 0 at equator, 1 at a pole
-	local poleCold = math.clamp((lat - B.poleColdStart) / (1 - B.poleColdStart), 0, 1)
-	local effTemp = temp - poleCold * B.poleColdStrength
-
 	local height, material, isOcean
-	if poleCold > 0.55 then
-		-- Ice cap: frozen, even over what would be ocean.
-		isOcean = false
-		height = R + detail * B.coldAmp
-		material = SNOW
-	elseif elev < B.oceanLevel then
+	if elev < B.oceanLevel then
 		-- Ocean: flat water at sea level (a Water crust just below R).
 		height = R
 		material = WATER
@@ -86,10 +66,10 @@ function Planet.sample(ux: number, uy: number, uz: number): (number, Enum.Materi
 			local ridged = 1 - math.abs(fbm(x, y, z, 4, B.detailFreq * 1.6))
 			height = R + m * B.mountainAmp + ridged * B.mountainAmp * 0.6
 			material = ((height - R) > B.snowLine) and SNOW or ROCK
-		elseif effTemp < B.coldLevel then
+		elseif temp < B.coldLevel then
 			height = R + detail * B.coldAmp
 			material = SNOW
-		elseif effTemp > B.hotLevel then
+		elseif temp > B.hotLevel then
 			height = R + detail * B.desertAmp
 			material = SAND
 		else
@@ -129,21 +109,6 @@ function Planet.radiusForSim(pos: { x: number, y: number, z: number }): number
 		return Planet.radiusForUnit(0, 1, 0)
 	end
 	return Planet.radiusForUnit(pos.x / m, pos.y / m, pos.z / m)
-end
-
--- Distant-view colour for a unit direction: returns (Color3, isOcean). Used to paint
--- the LOD planet's biome tiles so space matches where you land.
-function Planet.surfaceColor(ux: number, uy: number, uz: number): (Color3, boolean)
-	local _, material, isOcean = Planet.sample(ux, uy, uz)
-	if isOcean then
-		return OCEAN_COLOR, true
-	end
-	return MAT_COLOR[material] or OCEAN_COLOR, false
-end
-
--- Cloud density (0..1-ish) for a unit direction -- drives the LOD cloud layer.
-function Planet.cloudAt(ux: number, uy: number, uz: number): number
-	return fbm(ux * R, uy * R, uz * R, 3, B.cloudFreq)
 end
 
 -- Sea-level radius (the smooth datum; oceans render at this height).

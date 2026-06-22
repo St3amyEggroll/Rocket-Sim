@@ -17,7 +17,7 @@ Config.BODY = {
 	seed = 1337,
 	grassColor = Color3.fromRGB(86, 140, 74),
 	hillColor = Color3.fromRGB(74, 124, 66),
-	lodColor = Color3.fromRGB(38, 86, 138), -- distant ocean colour (continents drawn on top)
+	lodColor = Color3.fromRGB(66, 104, 116), -- distant body tint (ocean + land blend)
 }
 
 -- Render-distance terrain. The planet's surface is a single deterministic Perlin
@@ -58,10 +58,6 @@ Config.BIOMES = {
 	mountainAmp = 60, -- + ridged detail -> peaks
 	snowLine = 50, -- mountains above R+this are snow-capped
 	maxRelief = 110, -- worst-case |height - sea level| (streaming band/padding)
-	poleColdStart = 0.80, -- |latitude| where cold starts ramping (toward ice caps)
-	poleColdStrength = 1.0, -- how hard latitude pulls temperature down at the poles
-	cloudFreq = 0.0016, -- cloud noise frequency (LOD cloud layer)
-	cloudCover = 0.16, -- cloud density above this gets a cloud tile
 }
 
 Config.FLIGHT = {
