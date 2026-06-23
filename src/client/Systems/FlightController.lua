@@ -446,7 +446,7 @@ function FlightController:_step(rawDt)
 
 	if mode ~= "Flight" then
 		self._status = "VAB"
-		self._origin:UpdateFor(pos)
+		self._origin:UpdateForBody(vadd(pos, self:_bodyCenter()))
 		self:_fire({ pointDir = self._attitude.LookVector, throttle = 0, powered = false, status = "VAB", warp = 1, sas = "VAB" })
 		return
 	end
@@ -455,7 +455,7 @@ function FlightController:_step(rawDt)
 
 	-- Destroyed: the wreck is gone; hold here until the player relaunches (B / menu).
 	if self._crashed then
-		self._origin:UpdateFor(self._state.position)
+		self._origin:UpdateForBody(vadd(self._state.position, self:_bodyCenter()))
 		self:_fire({ pointDir = self._attitude.LookVector, throttle = 0, powered = false, status = "Crashed", warp = 1, sas = "--" })
 		return
 	end
@@ -540,7 +540,7 @@ function FlightController:_step(rawDt)
 	self:_checkSOI()
 
 	self._powered = powered
-	self._origin:UpdateFor(vadd(self._state.position, self:_bodyCenter()))
+	self._origin:UpdateForBody(vadd(self._state.position, self:_bodyCenter()))
 	local nose = self._attitude.LookVector
 	self:_fire({
 		pointDir = nose,

@@ -19,6 +19,8 @@ local FloatingOriginController = {}
 function FloatingOriginController:Init()
 	self._origin = Orbit.vec(0, 0, 0)
 	self._threshold = Config.FLOATING_ORIGIN.rebaseThreshold
+	self._nearRadius = Config.FLOATING_ORIGIN.nearRadius or 30000
+	self._farMode = false
 end
 
 function FloatingOriginController:Start()
@@ -56,6 +58,33 @@ function FloatingOriginController:UpdateFor(craftSimPos): boolean
 		return true
 	end
 	return false
+end
+
+-- Two-mode origin policy keyed to the craft's distance from the body centre
+-- (craftSimPos is Terra-centric):
+--   NEAR Terra  -> origin pinned to the body centre (0), so the FIXED terrain and the
+--                  biome shell -- which live at absolute world coords -- stay aligned.
+--   FAR from it -> origin follows the craft, so deep-space (e.g. solar orbit) coords stay
+--                  small and Roblox can render them without far-field jitter / culling.
+-- Hysteresis (enter far above nearRadius, return near below 0.8x) avoids boundary flicker.
+-- The snap is invisible because every renderer reads this same origin in the same frame.
+function FloatingOriginController:UpdateForBody(craftSimPos)
+	local r = math.sqrt(craftSimPos.x * craftSimPos.x + craftSimPos.y * craftSimPos.y + craftSimPos.z * craftSimPos.z)
+	if self._farMode then
+		if r < self._nearRadius * 0.8 then
+			self._farMode = false
+			self:SetOrigin(Orbit.vec(0, 0, 0))
+		else
+			self:SetOrigin(craftSimPos)
+		end
+	else
+		if r > self._nearRadius then
+			self._farMode = true
+			self:SetOrigin(craftSimPos)
+		else
+			self:SetOrigin(Orbit.vec(0, 0, 0))
+		end
+	end
 end
 
 return FloatingOriginController

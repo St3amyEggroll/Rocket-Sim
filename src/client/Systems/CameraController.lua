@@ -95,19 +95,20 @@ function CameraController:_update(state, info)
 	end
 
 	if self._input:GetMapMode() then
-		-- The map schematic is drawn at the world origin (MapViewController), so aim there --
-		-- not at the active body's real position, which can be ~900k studs out in solar orbit.
-		local target = self._origin:ToRender(Orbit.vec(0, 0, 0))
+		-- The map schematic is drawn at the LITERAL world origin (MapViewController), so aim
+		-- there. (Not ToRender(0): in far mode the floating origin follows the craft, so the
+		-- render origin is ~900k out -- the map must stay pinned to a fixed, render-safe spot.)
+		local target = Vector3.zero
 		local cosE = math.cos(orbit.elevation)
 		local dir = Vector3.new(
 			math.cos(orbit.azimuth) * cosE,
 			math.sin(orbit.elevation),
 			math.sin(orbit.azimuth) * cosE
 		)
-		local R = (info and info.bodyRadius) or self._bodyRadius or 500
-		local frameR = (info and info.mapFrameRadius) or R * 2
-		frameR = math.max(frameR, R * 1.4)
-		local distance = frameR * Config.CAMERA.mapCamMultiplier * orbit.mapZoom
+		-- Fixed, render-safe distance: the schematic is always sized to ~frameSize around the
+		-- origin (MapView scales the content for zoom), so the camera never has to move out
+		-- past the draw range to "zoom out".
+		local distance = Config.MAP.frameSize * Config.CAMERA.mapCamMultiplier
 		cam.CFrame = CFrame.lookAt(target + dir * distance, target)
 		return
 	end

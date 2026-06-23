@@ -208,7 +208,11 @@ Config.CONTROL = {
 	maxOmega = 12, -- rad/s angular-velocity safety cap
 }
 Config.FLOATING_ORIGIN = {
-	rebaseThreshold = 1e9, -- the world is small; never rebase (terrain is fixed)
+	rebaseThreshold = 1e9, -- legacy single-threshold rebase (unused by the body policy)
+	-- Within this distance of the body centre the origin is pinned to 0 (so the fixed
+	-- terrain + biome shell stay aligned); beyond it the origin follows the craft so
+	-- deep-space (solar orbit) coordinates stay small and render without jitter/culling.
+	nearRadius = 30000,
 }
 
 Config.INPUT = {
@@ -238,11 +242,17 @@ Config.CAMERA = {
 	fieldOfView = 70,
 	orbitSensitivity = 0.006,
 	zoomSensitivity = 0.12,
+	mapZoomSensitivity = 0.35, -- faster wheel step in the map (wide zoom range to reach the Sun)
 	minElevation = math.rad(-80),
 	maxElevation = math.rad(80),
-	mapZoomMin = 0.4,
-	mapZoomMax = 4,
-	mapCamMultiplier = 2.4,
+	-- Map zoom now scales the SCHEMATIC CONTENT (the camera stays at a fixed, render-safe
+	-- distance). The range is wide so you can zoom from a local orbit out to the whole
+	-- Sun/Terra/Mun system; the actual view radius is clamped to sane bounds in MapView.
+	mapZoomMin = 0.25,
+	mapZoomMax = 140,
+	-- Fixed map camera distance = frameSize * this. Kept so the whole schematic (content is
+	-- sized to ~frameSize) stays inside the draw range from the camera (no clipped far sides).
+	mapCamMultiplier = 1.65,
 }
 
 Config.ORBITLINE = {

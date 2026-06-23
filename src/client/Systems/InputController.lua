@@ -110,10 +110,13 @@ function InputController:Start()
 				camCfg.maxElevation
 			)
 		elseif input.UserInputType == Enum.UserInputType.MouseWheel and not gp then
-			local factor = 1 - input.Position.Z * camCfg.zoomSensitivity
 			if self._mapMode then
+				-- Map zoom scales the schematic content; use a faster step (wide zoom range).
+				local sens = camCfg.mapZoomSensitivity or camCfg.zoomSensitivity
+				local factor = 1 - input.Position.Z * sens
 				self._cam.mapZoom = math.clamp(self._cam.mapZoom * factor, camCfg.mapZoomMin, camCfg.mapZoomMax)
 			else
+				local factor = 1 - input.Position.Z * camCfg.zoomSensitivity
 				self._cam.distance =
 					math.clamp(self._cam.distance * factor, camCfg.distanceMin, camCfg.distanceMax)
 			end
