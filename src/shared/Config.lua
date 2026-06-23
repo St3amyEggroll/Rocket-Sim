@@ -48,10 +48,13 @@ Config.TERRAIN = {
 	spacing = 18, -- grid step between terrain columns inside a chunk
 	footprint = 26, -- column footprint (overlaps neighbours so there are no gaps)
 	crustThickness = 26, -- how deep each column fills below its surface
-	streamInAlt = 620, -- at/below this altitude terrain begins loading
+	streamInAlt = 700, -- at/below this altitude terrain begins loading...
+	streamLeadFactor = 6, -- ...plus this many studs of lead per stud/s of DESCENT speed
+	-- (so coming in hot, terrain starts loading from much higher up and is ready in time).
 	streamOutAlt = 900, -- above this altitude all terrain unloads (LOD only)
-	fillsPerYield = 60, -- terrain columns placed per frame while a chunk loads in
-	scanInterval = 0.15, -- seconds between render-distance rescans
+	fillsPerYield = 140, -- terrain columns placed per frame while a chunk loads in
+	maxConcurrentFills = 4, -- chunks filled in parallel (faster coverage when coming in hot)
+	scanInterval = 0.1, -- seconds between render-distance rescans
 }
 
 -- Biomes. A low-frequency "elevation" Perlin field shapes continents/oceans and a
@@ -134,10 +137,10 @@ Config.MAP = {
 --                            tiles if the client/engine can't apply it).
 --   smoothTexture = false -> a shell of biome-colored tiles (rock-solid, slightly faceted).
 Config.LOD = {
-	smoothTexture = true, -- set false to use the tile shell instead (if the texture looks wrong/blank)
+	smoothTexture = false, -- set true to try the painted texture (needs EditableImage support)
 	textureSize = 256, -- equirectangular image width (height = half); <= 1024
-	latBands = 18, -- tile shell: latitude rings (pole to pole)
-	lonBands = 48, -- tile shell: longitude tiles at the equator (fewer toward the poles)
+	latBands = 28, -- tile shell: latitude rings (pole to pole)
+	lonBands = 72, -- tile shell: longitude tiles at the equator (fewer toward the poles)
 }
 
 Config.CRAFT = {

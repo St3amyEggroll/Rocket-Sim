@@ -32,7 +32,7 @@ function TerrainController:Init()
 	self._loaded = {} -- key -> chunk-centre Vector3 of terrain currently laid
 	self._queue = {} -- ordered list of keys waiting to be filled
 	self._queued = {} -- key -> true (membership of _queue)
-	self._filling = false -- a chunk fill coroutine is running
+	self._fillCount = 0 -- number of chunk-fill coroutines running
 	self._present = false -- is any terrain currently laid?
 	self._lastScan = 0
 	self._chunkCount = 0
@@ -81,15 +81,25 @@ function TerrainController:_scan(state)
 	local r = math.sqrt(p.x * p.x + p.y * p.y + p.z * p.z)
 	local alt = r - R
 
+	-- Coming in hot: start loading from higher up the faster you're DESCENDING, so the
+	-- crust is ready before you arrive (horizontal orbit speed doesn't trigger this).
+	local descent = 0
+	if r > 1e-3 then
+		local v = state.velocity
+		descent = math.max(0, -(v.x * p.x + v.y * p.y + v.z * p.z) / r)
+	end
+	local streamIn = T.streamInAlt + (T.streamLeadFactor or 0) * descent
+	local streamOut = math.max(T.streamOutAlt, streamIn + 400)
+
 	-- Too high: drop everything, the Ball is the LOD.
-	if alt > T.streamOutAlt then
+	if alt > streamOut then
 		if self._present then
 			self:_unloadAll()
 		end
 		return
 	end
-	-- Hysteresis: only begin loading once we are below streamInAlt.
-	if not self._present and alt > T.streamInAlt then
+	-- Hysteresis: only begin loading once we are below the (speed-scaled) stream-in altitude.
+	if not self._present and alt > streamIn then
 		return
 	end
 
@@ -153,25 +163,24 @@ function TerrainController:_scan(state)
 	self._present = self._chunkCount > 0 or #self._queue > 0
 end
 
--- Start filling the next queued chunk if idle (one chunk at a time, frame-spread).
+-- Start filling queued chunks, up to maxConcurrentFills at once (faster coverage).
 function TerrainController:_pump()
-	if self._filling or #self._queue == 0 then
-		return
-	end
-	local key = table.remove(self._queue, 1)
-	local center = self._queued[key]
-	self._queued[key] = nil
-	if not center then
-		return
-	end
-	self._filling = true
-	task.spawn(function()
-		local completed = self:_fillChunk(center, self._gen)
-		if completed then
-			self._loaded[key] = center
+	local maxFills = Config.TERRAIN.maxConcurrentFills or 1
+	while self._fillCount < maxFills and #self._queue > 0 do
+		local key = table.remove(self._queue, 1)
+		local center = self._queued[key]
+		self._queued[key] = nil
+		if center then
+			self._fillCount += 1
+			task.spawn(function()
+				local completed = self:_fillChunk(center, self._gen)
+				if completed then
+					self._loaded[key] = center
+				end
+				self._fillCount -= 1
+			end)
 		end
-		self._filling = false
-	end)
+	end
 end
 
 -- Lay one chunk's terrain. For each grid cell we sample the biome surface and fill a
@@ -245,7 +254,7 @@ end
 -- For the debug overlay: which LOD is currently showing.
 function TerrainController:GetLODState()
 	if self._present then
-		local q = #self._queue + (self._filling and 1 or 0)
+		local q = #self._queue + self._fillCount
 		if q > 0 then
 			return string.format("crust: %d chunks (+%d loading)", self._chunkCount, q)
 		end

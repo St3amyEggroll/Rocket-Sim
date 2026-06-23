@@ -53,6 +53,7 @@ function VehicleController:Init()
 	self._editing = true -- VAB shows the whole craft; flight runs the staging sim
 	self._autoStage = true -- auto-assign stages until the player edits the staging panel
 	self._stageFloor = 0 -- lowest number of stages (the panel can add empty ones)
+	self._nextSymId = 1 -- ids shared by parts placed together as a symmetry set
 
 	-- Default rocket: stack the default design vertically (bottom -> top) in build space.
 	self._parts = {}
@@ -329,15 +330,184 @@ end
 
 -- Place a part at a build-local CFrame, attached to `parent` (a part index or nil for
 -- the root). Returns the new part's index.
-function VehicleController:AddPartAt(id, cf, parent, surface)
+-- Raw insert (no recompute). symId/symIndex tag a part as a member of a symmetry set.
+function VehicleController:_appendPart(id, cf, parent, surface, symId, symIndex)
 	local def = Catalog.get(id)
 	if not def then
 		return nil
 	end
-	-- `surface` records a radial/surface attach (no fuel crossfeed across it).
-	table.insert(self._parts, { id = id, def = def, cf = cf, parent = parent, surface = surface or false })
-	self:_recompute()
+	table.insert(self._parts, {
+		id = id,
+		def = def,
+		cf = cf,
+		parent = parent,
+		surface = surface or false,
+		symId = symId,
+		symIndex = symIndex,
+	})
 	return #self._parts
+end
+
+function VehicleController:AddPartAt(id, cf, parent, surface, symId)
+	local idx = self:_appendPart(id, cf, parent, surface, symId, nil)
+	if idx then
+		self:_recompute()
+	end
+	return idx
+end
+
+function VehicleController:NewSymId()
+	local id = self._nextSymId
+	self._nextSymId += 1
+	return id
+end
+
+-- The symmetry set a part belongs to: a sorted list of { index, symIndex } (the part
+-- itself if it has no group).
+function VehicleController:GetSymGroup(index)
+	local p = self._parts[index]
+	local out = {}
+	if p and p.symId then
+		for i, q in ipairs(self._parts) do
+			if q.symId == p.symId then
+				out[#out + 1] = { index = i, symIndex = q.symIndex or 0 }
+			end
+		end
+		table.sort(out, function(a, b)
+			return a.symIndex < b.symIndex
+		end)
+	else
+		out[1] = { index = index, symIndex = 0 }
+	end
+	return out
+end
+
+function VehicleController:GetSymGroupSize(index)
+	local p = self._parts[index]
+	if not p or not p.symId then
+		return 1
+	end
+	local n = 0
+	for _, q in ipairs(self._parts) do
+		if q.symId == p.symId then
+			n += 1
+		end
+	end
+	return n
+end
+
+-- A part plus all its descendants (parents listed before children), by part index.
+function VehicleController:GetSubtree(index)
+	local out = { index }
+	local seen = { [index] = true }
+	local changed = true
+	while changed do
+		changed = false
+		for i, p in ipairs(self._parts) do
+			if not seen[i] and p.parent and seen[p.parent] then
+				seen[i] = true
+				out[#out + 1] = i
+				changed = true
+			end
+		end
+	end
+	return out
+end
+
+-- The lateral axis (x,z) of a part's root ancestor -- the core to mirror symmetry around.
+function VehicleController:GetRootAxis(index)
+	local p = self._parts[index]
+	local guard = 0
+	while p and p.parent and self._parts[p.parent] and guard < 4096 do
+		index = p.parent
+		p = self._parts[index]
+		guard += 1
+	end
+	if p then
+		return { x = p.cf.X, z = p.cf.Z }
+	end
+	return { x = 0, z = 0 }
+end
+
+-- Remove a SET of parts ({ [index]=true }) at once, repairing parent links. Returns a
+-- remap (oldIndex -> newIndex) for the survivors.
+function VehicleController:RemoveParts(indexSet)
+	local newParts, remap = {}, {}
+	for i, p in ipairs(self._parts) do
+		if not indexSet[i] then
+			newParts[#newParts + 1] = p
+			remap[i] = #newParts
+		end
+	end
+	for _, p in ipairs(newParts) do
+		if p.parent then
+			p.parent = remap[p.parent] -- nil if the parent was removed
+		end
+	end
+	self._parts = newParts
+	self:_recompute()
+	return remap
+end
+
+-- Add a UNIT (a blueprint of a part + its subtree, relative to the root) rotated by
+-- `angle` about `axis`(x,z) and positioned at rootPos. The root parents to `rootParent`
+-- and takes `rootSurface`/`symId`/`symIndex`; the subtree reconstructs its own links.
+function VehicleController:_addUnitCopy(blueprint, rootPos, rootParent, rootSurface, axis, angle, symId, symIndex)
+	local ca, sa = math.cos(angle), math.sin(angle)
+	local function rotY(vx, vz)
+		return vx * ca - vz * sa, vx * sa + vz * ca
+	end
+	local rox, roz = rotY(rootPos.X - axis.x, rootPos.Z - axis.z)
+	local newRootX, newRootZ = axis.x + rox, axis.z + roz
+	local localToGlobal, rootIdx = {}, nil
+	for li, bp in ipairs(blueprint) do
+		local relx, relz = rotY(bp.rel.X, bp.rel.Z)
+		local pos = Vector3.new(newRootX + relx, rootPos.Y + bp.rel.Y, newRootZ + relz)
+		local par = (bp.parentLocal == 0) and rootParent or localToGlobal[bp.parentLocal]
+		local surf = (li == 1) and rootSurface or bp.surface
+		local sid = (li == 1) and symId or nil
+		local sidx = (li == 1) and symIndex or nil
+		local idx = self:_appendPart(bp.id, CFrame.new(pos), par, surf, sid, sidx)
+		localToGlobal[li] = idx
+		if li == 1 then
+			rootIdx = idx
+		end
+	end
+	return rootIdx
+end
+
+-- Place a unit (single part or a picked-up subtree) at the snap, applying symmetry:
+-- onto a symmetric target it mirrors to every sibling; otherwise it spreads `symCount`
+-- copies around the core axis. Returns the primary (first) root index.
+function VehicleController:PlaceUnit(blueprint, rootPos, parent, rootSurface, symCount)
+	symCount = math.max(1, math.floor(symCount or 1))
+	local axis = (parent and self:GetRootAxis(parent)) or { x = 0, z = 0 }
+	local group = parent and self:GetSymGroup(parent) or nil
+
+	local copies = {}
+	if group and #group == symCount and symCount > 1 then
+		-- Auto-match: one copy on each sibling, at the same relative position.
+		local tIdx = self._parts[parent].symIndex or 0
+		for _, sib in ipairs(group) do
+			local da = ((sib.symIndex - tIdx) % symCount) * (2 * math.pi / symCount)
+			copies[#copies + 1] = { parent = sib.index, angle = da }
+		end
+	else
+		for k = 0, symCount - 1 do
+			copies[#copies + 1] = { parent = parent, angle = k * (2 * math.pi / symCount) }
+		end
+	end
+
+	local symId = (#copies > 1) and self:NewSymId() or nil
+	local primary
+	for ci, c in ipairs(copies) do
+		local idx = self:_addUnitCopy(blueprint, rootPos, c.parent, rootSurface, axis, c.angle, symId, ci - 1)
+		if ci == 1 then
+			primary = idx
+		end
+	end
+	self:_recompute()
+	return primary
 end
 
 -- Move an existing part to a new CFrame (and optionally re-parent it).
@@ -353,20 +523,19 @@ function VehicleController:MovePart(index, cf, parent)
 	self:_recompute()
 end
 
+-- Delete a part along with its whole subtree AND any symmetric copies (and their
+-- subtrees) -- consistent with how picking a part up grabs them.
 function VehicleController:RemovePart(index)
 	if not self._parts[index] then
 		return
 	end
-	table.remove(self._parts, index)
-	-- Repair parent links: orphan the removed part's children, shift higher indices down.
-	for _, p in ipairs(self._parts) do
-		if p.parent == index then
-			p.parent = nil
-		elseif p.parent and p.parent > index then
-			p.parent -= 1
+	local removeSet = {}
+	for _, g in ipairs(self:GetSymGroup(index)) do
+		for _, gi in ipairs(self:GetSubtree(g.index)) do
+			removeSet[gi] = true
 		end
 	end
-	self:_recompute()
+	self:RemoveParts(removeSet)
 end
 
 function VehicleController:Clear()

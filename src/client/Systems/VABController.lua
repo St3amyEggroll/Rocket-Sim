@@ -90,7 +90,7 @@ function VABController:Init()
 	self._tabBtns = {}
 	self._activeCat = CATS[1].id
 	self._selected = nil -- part index of the last placed/inspected part
-	self._drag = nil -- { id, def, ghost, pod, originalCF, originalParent }
+	self._drag = nil -- { id, def, ghost, pod, unit?, symCount?, origin? }
 	self._snap = nil -- { cf, parent, isSurface } the ghost will commit to on release
 	self._snapMode = true -- node/angle snapping on (vs free placement)
 	self._symmetry = 1 -- 1..8 radial copies for surface-attached parts
@@ -513,22 +513,58 @@ function VABController:_beginDragNew(id)
 end
 
 function VABController:_beginDragExisting(index)
-	local part = self._vehicle:GetParts()[index]
+	local parts = self._vehicle:GetParts()
+	local part = parts[index]
 	if not part then
 		return
 	end
 	self:_cancelDrag(false)
+
+	-- Blueprint of the grabbed part + its WHOLE subtree (the tank/engine on it), relative
+	-- to the root (parents are listed before children, so links rebuild cleanly).
+	local subtree = self._vehicle:GetSubtree(index)
+	local rootPos = part.cf.Position
+	local localOf = {}
+	for li, gi in ipairs(subtree) do
+		localOf[gi] = li
+	end
+	local blueprint = {}
+	for li, gi in ipairs(subtree) do
+		local sp = parts[gi]
+		blueprint[li] = {
+			id = sp.id,
+			surface = sp.surface,
+			rel = sp.cf.Position - rootPos,
+			parentLocal = (sp.parent and localOf[sp.parent]) or 0,
+		}
+	end
+
+	-- Also lift every symmetric sibling (and its subtree) -- they rebuild from the blueprint.
+	local group = self._vehicle:GetSymGroup(index)
+	local removeSet = {}
+	for _, g in ipairs(group) do
+		for _, gi in ipairs(self._vehicle:GetSubtree(g.index)) do
+			removeSet[gi] = true
+		end
+	end
+	local externalParent = part.parent
+	local remap = self._vehicle:RemoveParts(removeSet) -- shifts indices; remap survivors
+
 	self._drag = {
 		id = part.id,
 		def = part.def,
 		ghost = self:_makeGhost(part.def),
 		pod = (part.def.shape == "pod"),
-		originalCF = part.cf,
-		originalParent = part.parent,
-		originalSurface = part.surface,
+		unit = blueprint,
+		symCount = #group,
+		origin = {
+			pos = rootPos,
+			parent = externalParent and remap[externalParent] or nil,
+			surface = part.surface,
+			symCount = #group,
+		},
 	}
 	self._selected = nil
-	self._vehicle:RemovePart(index) -- lift it off; rebuilds the live model without it
 	self:_updatePartPanel()
 end
 
@@ -546,8 +582,9 @@ function VABController:_cancelDrag(restore)
 	if self._node then
 		self._node.Transparency = 1
 	end
-	if restore and d.originalCF then
-		self._selected = self._vehicle:AddPartAt(d.id, d.originalCF, d.originalParent, d.originalSurface)
+	if restore and d.unit and d.origin then
+		self._selected =
+			self._vehicle:PlaceUnit(d.unit, d.origin.pos, d.origin.parent, d.origin.surface, d.origin.symCount)
 	end
 	self:_updatePartPanel()
 end
@@ -566,38 +603,31 @@ function VABController:_onRelease()
 	local snap = self._snap
 	local cf = snap and snap.cf or self:_freePlane()
 	local parent = snap and snap.parent or nil
-	local isSurface = snap and snap.isSurface
+	local isSurface = (snap and snap.isSurface) or false
 	d.ghost:Destroy()
 	self._drag = nil
 	self._snap = nil
 	if self._node then
 		self._node.Transparency = 1
 	end
-	-- Symmetry: a surface-attached part places N evenly-spaced copies around the parent's
-	-- axis; everything else places a single part.
-	if isSurface and parent and self._symmetry > 1 then
-		self._selected = self:_placeSymmetry(d.id, cf, parent, self._symmetry)
-	else
-		self._selected = self._vehicle:AddPartAt(d.id, cf, parent, isSurface)
-	end
-	self:_updatePartPanel()
-end
 
-function VABController:_placeSymmetry(id, cf, parent, n)
-	local parentPart = self._vehicle:GetParts()[parent]
-	if not parentPart then
-		return self._vehicle:AddPartAt(id, cf, parent, true)
+	-- A new part is a one-part unit; a picked-up part carries its whole subtree as a unit.
+	local blueprint = d.unit or { { id = d.id, surface = isSurface, rel = Vector3.zero, parentLocal = 0 } }
+
+	-- How many symmetric copies: auto-match the target's symmetry group; else restore the
+	-- count a picked-up unit had; else the manual [X] symmetry on a surface attach; else 1.
+	local symCount = 1
+	local groupSize = parent and self._vehicle:GetSymGroupSize(parent) or 1
+	if groupSize > 1 then
+		symCount = groupSize
+	elseif d.unit and d.symCount and d.symCount > 1 then
+		symCount = d.symCount
+	elseif isSurface and parent and self._symmetry > 1 then
+		symCount = self._symmetry
 	end
-	local px, pz = parentPart.cf.X, parentPart.cf.Z
-	local ox, oz = cf.X - px, cf.Z - pz
-	local y = cf.Y
-	local last
-	for k = 0, n - 1 do
-		local a = k * (2 * math.pi / n)
-		local ca, sa = math.cos(a), math.sin(a)
-		last = self._vehicle:AddPartAt(id, CFrame.new(px + ox * ca - oz * sa, y, pz + ox * sa + oz * ca), parent, true)
-	end
-	return last
+
+	self._selected = self._vehicle:PlaceUnit(blueprint, cf.Position, parent, isSurface, symCount)
+	self:_updatePartPanel()
 end
 
 function VABController:_cursorOverPalette()
