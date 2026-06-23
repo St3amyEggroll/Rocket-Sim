@@ -155,7 +155,9 @@ function HUDController:_update(state, info)
 	-- with landing; sea-level altitude/apsides remain relative to the datum.
 	local p = state.position
 	local rMag = math.sqrt(p.x * p.x + p.y * p.y + p.z * p.z)
-	local radarAlt = rMag - Planet.radiusForSim(p)
+	-- The moon is a smooth sphere (no terrain field); Terra uses the heightfield.
+	local surfaceR = (info.bodyId == "moon") and info.bodyRadius or Planet.radiusForSim(p)
+	local radarAlt = rMag - surfaceR
 	local vertSpeed = 0
 	if rMag > 1e-6 then
 		local v = state.velocity
@@ -197,7 +199,8 @@ function HUDController:_update(state, info)
 	else
 		statusColor = Color3.fromRGB(120, 200, 255)
 	end
-	L.statusMode.Text = "* " .. string.upper(info.status)
+	local bodyTag = info.bodyName and ("   [" .. string.upper(info.bodyName) .. "]") or ""
+	L.statusMode.Text = "* " .. string.upper(info.status) .. bodyTag
 	L.statusMode.TextColor3 = statusColor
 
 	local t = info.tele

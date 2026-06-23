@@ -32,10 +32,41 @@ local function unit(v)
 	return Orbit.vec(v.x / m, v.y / m, v.z / m)
 end
 
+local function vadd(a, b)
+	return Orbit.vec(a.x + b.x, a.y + b.y, a.z + b.z)
+end
+local function vsub(a, b)
+	return Orbit.vec(a.x - b.x, a.y - b.y, a.z - b.z)
+end
+local function vlen(a)
+	return math.sqrt(a.x * a.x + a.y * a.y + a.z * a.z)
+end
+
 function FlightController:Init()
 	local body = Config.BODY
+	-- The active central body switches with the SOI (patched conics). Sim state is kept
+	-- RELATIVE to the active body; absolute (Terra-centric) positions are reconstructed
+	-- by adding the active body's centre.
+	self._planetMu = body.mu
+	self._planetRadius = body.radius
 	self._mu = body.mu
 	self._bodyRadius = body.radius
+	self._bodyId = "planet"
+	self._bodyName = body.name
+	self._missionTime = 0
+
+	local m = Config.MOON
+	self._moon = {
+		name = m.name,
+		mu = m.mu,
+		radius = m.radius,
+		orbitRadius = m.orbitRadius,
+		color = m.color,
+		phase = m.phase or 0,
+		w = math.sqrt(body.mu / (m.orbitRadius * m.orbitRadius * m.orbitRadius)),
+		soi = m.orbitRadius * (m.mu / body.mu) ^ (2 / 5),
+	}
+
 	self._turnStart = Config.LAUNCH.turnStartAlt
 	self._turnEnd = Config.LAUNCH.turnEndAlt
 	-- Launch site at the +Y pole, sitting on the terrain height there.
@@ -89,7 +120,12 @@ end
 
 function FlightController:_onMode(mode)
 	self._vehicle:ResetRuntime()
-	-- Sit on the pad (the base rests on the surface).
+	-- Back on the pad: reset to Terra (the active body), at the +Y pole.
+	self._bodyId = "planet"
+	self._mu = self._planetMu
+	self._bodyRadius = self._planetRadius
+	self._bodyName = Config.BODY.name
+	self._missionTime = 0
 	self._state = { position = Orbit.vec(0, self._launchRadius, 0), velocity = Orbit.vec(0, 0, 0) }
 	self._attitude = CFrame.lookAt(Vector3.zero, Vector3.yAxis, Vector3.xAxis)
 	self._omega = Vector3.zero
@@ -97,6 +133,57 @@ function FlightController:_onMode(mode)
 	self._crashed = false
 	self._status = (mode == "Flight") and "Landed" or "VAB"
 	self._origin:SetOrigin(Orbit.vec(0, 0, 0))
+end
+
+-- The moon's Terra-centric state (position, velocity) at mission time t. It orbits in
+-- the Y/Z plane so a polar ascent is coplanar with it.
+function FlightController:_moonStateAt(t)
+	local m = self._moon
+	local a = m.phase + m.w * t
+	local ca, sa = math.cos(a), math.sin(a)
+	local r = m.orbitRadius
+	return Orbit.vec(0, r * ca, r * sa), Orbit.vec(0, -r * m.w * sa, r * m.w * ca)
+end
+
+-- Terra-centric centre / velocity of the active body (zero for Terra itself).
+function FlightController:_bodyCenter()
+	if self._bodyId == "moon" then
+		local p = self:_moonStateAt(self._missionTime)
+		return p
+	end
+	return Orbit.vec(0, 0, 0)
+end
+function FlightController:_bodyVel()
+	if self._bodyId == "moon" then
+		local _, v = self:_moonStateAt(self._missionTime)
+		return v
+	end
+	return Orbit.vec(0, 0, 0)
+end
+
+-- Patched conics: hop the sim state between Terra's frame and the moon's frame as the
+-- craft crosses the moon's sphere of influence.
+function FlightController:_checkSOI()
+	if self._bodyId == "planet" then
+		local mpos, mvel = self:_moonStateAt(self._missionTime)
+		local rel = vsub(self._state.position, mpos) -- planet-frame: state IS Terra-centric
+		if vlen(rel) < self._moon.soi then
+			self._state = { position = rel, velocity = vsub(self._state.velocity, mvel) }
+			self._bodyId = "moon"
+			self._mu = self._moon.mu
+			self._bodyRadius = self._moon.radius
+			self._bodyName = self._moon.name
+			self._landed = false
+		end
+	elseif vlen(self._state.position) > self._moon.soi then
+		local mpos, mvel = self:_moonStateAt(self._missionTime)
+		self._state = { position = vadd(self._state.position, mpos), velocity = vadd(self._state.velocity, mvel) }
+		self._bodyId = "planet"
+		self._mu = self._planetMu
+		self._bodyRadius = self._planetRadius
+		self._bodyName = Config.BODY.name
+		self._landed = false
+	end
 end
 
 function FlightController:_ascentDirection(pos)
@@ -181,7 +268,7 @@ function FlightController:_updateRotation(dt, pos, vel, powered, throttle)
 	local A = Config.ATMOSPHERE
 	local r = math.sqrt(pos.x * pos.x + pos.y * pos.y + pos.z * pos.z)
 	local alt = r - self._bodyRadius
-	if alt < A.top then
+	if self._bodyId == "planet" and alt < A.top then
 		local rho = math.exp(-math.max(alt, 0) / A.scaleHeight)
 		local speed = math.sqrt(vel.x * vel.x + vel.y * vel.y + vel.z * vel.z)
 		if speed > 1e-3 then
@@ -252,6 +339,18 @@ function FlightController:_fire(extra)
 	extra.mapFrameRadius = mapFrame
 	extra.mu = self._mu
 	extra.bodyRadius = self._bodyRadius
+	-- Patched-conic context: the active body's Terra-centric centre/velocity (so the
+	-- renderer/camera can place the relative state in the world) and the moon's state
+	-- (so the map can show it).
+	extra.bodyId = self._bodyId
+	extra.bodyName = self._bodyName
+	extra.bodyCenter = self:_bodyCenter()
+	extra.bodyVel = self:_bodyVel()
+	local mpos = self:_moonStateAt(self._missionTime)
+	extra.moonCenter = mpos
+	extra.moonRadius = self._moon.radius
+	extra.moonSoi = self._moon.soi
+	extra.moonColor = self._moon.color
 	self.Updated:Fire(self._state, extra)
 end
 
@@ -285,7 +384,7 @@ function FlightController:_step(rawDt)
 	-- Are we in air? (drag + reentry live here, and warp is pinned to 1x.)
 	local A = Config.ATMOSPHERE
 	local r0 = math.sqrt(pos.x * pos.x + pos.y * pos.y + pos.z * pos.z)
-	local inAtmo = (r0 - self._bodyRadius) < A.top
+	local inAtmo = (self._bodyId == "planet") and ((r0 - self._bodyRadius) < A.top)
 	local effWarp = warp
 	local reentry = 0
 
@@ -314,7 +413,7 @@ function FlightController:_step(rawDt)
 				end
 				local r2 = math.sqrt(p2.x * p2.x + p2.y * p2.y + p2.z * p2.z)
 				local alt2 = r2 - self._bodyRadius
-				if alt2 < A.top then
+				if self._bodyId == "planet" and alt2 < A.top then
 					-- a_drag = -k * densityFrac * |v| * v  (opposes velocity)
 					local rho = math.exp(-math.max(alt2, 0) / A.scaleHeight)
 					local speed = math.sqrt(v2.x * v2.x + v2.y * v2.y + v2.z * v2.z)
@@ -348,8 +447,12 @@ function FlightController:_step(rawDt)
 		end
 	end
 
+	-- Advance mission time (the moon orbits on rails) and hop SOIs if we crossed one.
+	self._missionTime += dt * effWarp
+	self:_checkSOI()
+
 	self._powered = powered
-	self._origin:UpdateFor(self._state.position)
+	self._origin:UpdateFor(vadd(self._state.position, self:_bodyCenter()))
 	local nose = self._attitude.LookVector
 	self:_fire({
 		pointDir = nose,
@@ -375,13 +478,17 @@ function FlightController:_checkTouchdown()
 	local nose = self._attitude.LookVector -- base -> nose, unit
 	local len = self._vehicle:GetRotProfile().length
 
+	-- On the moon there is no terrain heightfield: the surface is a smooth sphere.
+	local onMoon = (self._bodyId == "moon")
+	local moonR = self._moon.radius
+
 	local maxPen = 0
 	local s = 0
 	while s <= len + 1e-3 do
 		local wx, wy, wz = p.x + nose.X * s, p.y + nose.Y * s, p.z + nose.Z * s
 		local wr = math.sqrt(wx * wx + wy * wy + wz * wz)
 		if wr > 1e-6 then
-			local surf = Planet.radiusForUnit(wx / wr, wy / wr, wz / wr)
+			local surf = onMoon and moonR or Planet.radiusForUnit(wx / wr, wy / wr, wz / wr)
 			local pen = surf - wr
 			if pen > maxPen then
 				maxPen = pen
@@ -421,6 +528,14 @@ function FlightController:GetMu()
 end
 function FlightController:GetBodyRadius()
 	return self._bodyRadius
+end
+-- The moon's current Terra-centric position (for MoonRenderer) and its size.
+function FlightController:GetMoonCenter()
+	local p = self:_moonStateAt(self._missionTime)
+	return p
+end
+function FlightController:GetMoonRadius()
+	return self._moon.radius
 end
 -- Sim position of the launch pad base (the VAB build origin / nose points +Y here).
 function FlightController:GetLaunchPosition()

@@ -47,13 +47,13 @@ function TerrainController:Start()
 	end)
 
 	local Flight = Registry:Get("FlightController")
-	Flight:GetUpdatedSignal():Connect(function(state)
-		self:_onUpdate(state)
+	Flight:GetUpdatedSignal():Connect(function(state, info)
+		self:_onUpdate(state, info)
 	end)
 end
 
 -- Per-frame: keep the fill queue moving, and (throttled) rescan render distance.
-function TerrainController:_onUpdate(state)
+function TerrainController:_onUpdate(state, info)
 	self:_pump()
 
 	local now = os.clock()
@@ -61,6 +61,15 @@ function TerrainController:_onUpdate(state)
 		return
 	end
 	self._lastScan = now
+
+	-- Terra terrain only: when the craft is in the moon's SOI the sim state is
+	-- moon-relative, so drop all Terra terrain (the moon is a smooth sphere).
+	if info and info.bodyId and info.bodyId ~= "planet" then
+		if self._present then
+			self:_unloadAll()
+		end
+		return
+	end
 	self:_scan(state)
 end
 

@@ -334,9 +334,14 @@ function CraftRenderer:_explode(at)
 end
 
 function CraftRenderer:_render(state, info)
-	local craftRender = self._origin:ToRender(state.position)
+	-- Sim state is relative to the active body (patched conics); add the body's centre to
+	-- get the Terra-centric position the world is rendered around.
+	local bc = (info and info.bodyCenter) or Orbit.vec(0, 0, 0)
+	local bv = (info and info.bodyVel) or Orbit.vec(0, 0, 0)
+	local absPos = Orbit.vec(state.position.x + bc.x, state.position.y + bc.y, state.position.z + bc.z)
+	local craftRender = self._origin:ToRender(absPos)
 	local v = state.velocity
-	self._lastVel = Vector3.new(v.x, v.y, v.z) -- separation velocity for spent stages
+	self._lastVel = Vector3.new(v.x + bv.x, v.y + bv.y, v.z + bv.z) -- separation velocity for spent stages
 
 	-- Map view draws a compressed orbit near the origin; hide the real (true-scale) craft.
 	if info and info.mapMode then

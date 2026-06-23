@@ -35,8 +35,13 @@ function SkyController:Start()
 	self:_setupSky()
 
 	Flight:GetUpdatedSignal():Connect(function(state, info)
-		local p = state.position
-		self._alt = math.sqrt(p.x * p.x + p.y * p.y + p.z * p.z) - self._bodyRadius
+		if info and info.bodyId == "moon" then
+			-- Airless moon: always the space sky (stars), regardless of moon altitude.
+			self._alt = Config.SKY.blendEndAlt
+		else
+			local p = state.position
+			self._alt = math.sqrt(p.x * p.x + p.y * p.y + p.z * p.z) - self._bodyRadius
+		end
 		self._mapMode = info and info.mapMode or false
 	end)
 

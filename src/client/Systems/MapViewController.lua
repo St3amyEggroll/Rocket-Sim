@@ -128,6 +128,34 @@ function MapViewController:_buildPool()
 	pmesh.Parent = planet
 	self._mapPlanet = planet
 	self._mapPlanetMesh = pmesh
+
+	-- The moon: a body sphere + a dashed orbit ring, shown (relative to Terra) while you
+	-- are in Terra's SOI so you can aim a transfer at it.
+	local moon = Instance.new("Part")
+	moon.Name = "MapMoon"
+	moon.Anchored = true
+	moon.CanCollide = false
+	moon.CanQuery = false
+	moon.CanTouch = false
+	moon.CastShadow = false
+	moon.Shape = Enum.PartType.Ball
+	moon.Material = Enum.Material.SmoothPlastic
+	moon.Color = Config.MOON.color
+	moon.Size = Vector3.new(10, 10, 10)
+	moon.Parent = folder
+	self._moonMarker = moon
+	markerLabel(moon, Config.MOON.name)
+
+	self._moonRing = {}
+	for i = 1, 48 do
+		self._moonRing[i] = newPart(Color3.fromRGB(120, 124, 140))
+	end
+	-- Unit circle in the Y/Z plane (the moon's orbit plane); scaled by the orbit radius.
+	self._unitCircle = {}
+	for i = 0, 48 do
+		local a = (i / 48) * 2 * math.pi
+		self._unitCircle[i + 1] = Vector3.new(0, math.cos(a), math.sin(a))
+	end
 end
 
 function MapViewController:_setVisible(v)
@@ -139,13 +167,19 @@ function MapViewController:_setVisible(v)
 	self._periMarker.Transparency = v and 0 or 1
 	self._craftMarker.Transparency = v and 0 or 1
 	self._mapPlanet.Transparency = v and 0 or 1
+	if not v then
+		self._moonMarker.Transparency = 1
+		for _, seg in ipairs(self._moonRing) do
+			seg.Transparency = 1
+		end
+	end
 end
 
-function MapViewController:_recompute(state)
-	self._simPath = Orbit.sampleOrbitPath(state, self._mu, Config.ORBITLINE.segments)
+function MapViewController:_recompute(state, mu)
+	mu = mu or self._mu
+	self._simPath = Orbit.sampleOrbitPath(state, mu, Config.ORBITLINE.segments)
 
 	-- Exact orbital geometry from state (eccentricity vector points to periapsis).
-	local mu = self._mu
 	local pos, vel = state.position, state.velocity
 	local r = mag(pos)
 	local speed = mag(vel)
@@ -173,6 +207,41 @@ function MapViewController:_recompute(state)
 	self._apoR = apoR
 end
 
+-- Draw the moon body + its orbit ring relative to Terra (only inside Terra's SOI).
+function MapViewController:_drawMoon(info, focus, s, mk)
+	if info.bodyId ~= "planet" or not info.moonCenter then
+		self._moonMarker.Transparency = 1
+		for _, seg in ipairs(self._moonRing) do
+			seg.Transparency = 1
+		end
+		return
+	end
+	local mc = info.moonCenter
+	self._moonMarker.Transparency = 0
+	local md = math.max((info.moonRadius or 0) * s * 2, mk * 1.4)
+	self._moonMarker.Size = Vector3.new(md, md, md)
+	self._moonMarker.CFrame = CFrame.new(focus + Vector3.new(mc.x, mc.y, mc.z) * s)
+
+	local radius = mag(mc)
+	local ringThick = math.max((info.bodyRadius or 1) * s * 0.02, 0.05)
+	local prev
+	for i = 1, #self._unitCircle do
+		local pt = focus + (self._unitCircle[i] * radius) * s
+		if prev then
+			local seg = self._moonRing[i - 1]
+			local len = (pt - prev).Magnitude
+			if len < 1e-3 then
+				seg.Transparency = 1
+			else
+				seg.Transparency = 0.4
+				seg.Size = Vector3.new(ringThick, ringThick, len)
+				seg.CFrame = CFrame.lookAt((pt + prev) * 0.5, pt)
+			end
+		end
+		prev = pt
+	end
+end
+
 function MapViewController:_update(state, info)
 	if not (info and info.mapMode) then
 		if self._visible then
@@ -184,32 +253,40 @@ function MapViewController:_update(state, info)
 		self._needRecompute = true
 	end
 
+	-- The map is centred on (and scaled to) the ACTIVE body -- so it follows you into the
+	-- moon's SOI automatically.
+	local mu = info.mu or self._mu
+	local R = info.bodyRadius or self._bodyRadius
+
 	self._frame += 1
 	if (info and info.powered) or self._frame % 15 == 0 then
 		self._needRecompute = true
 	end
 	if self._needRecompute or not self._simPath then
-		self:_recompute(state)
+		self:_recompute(state, mu)
 		self._needRecompute = false
 	end
 
-	local focus = self._origin:ToRender(Orbit.vec(0, 0, 0))
+	local focus = self._origin:ToRender(info.bodyCenter or Orbit.vec(0, 0, 0))
 	local s = info.mapScale or 1
-	local R = self._bodyRadius
 	local function projVec(v)
 		return focus + v * s
 	end
 	local function projSim(sp)
 		return focus + Vector3.new(sp.x, sp.y, sp.z) * s
 	end
-	local thickness = self._bodyRadius * s * 0.03
-	local mk = self._bodyRadius * s * 0.08
+	local thickness = R * s * 0.03
+	local mk = R * s * 0.08
 
-	-- Compressed body sphere at the focus (sea-level radius * scale).
-	local pd = self._bodyRadius * s * 2
+	-- Compressed body sphere at the focus (the active body, sized to its radius).
+	local pd = R * s * 2
 	local psc = pd / 2048
 	self._mapPlanetMesh.Scale = Vector3.new(psc, psc, psc)
+	self._mapPlanet.Color = (info.bodyId == "moon") and Config.MOON.color or (Config.BODY.lodColor or Config.BODY.grassColor)
 	self._mapPlanet.CFrame = CFrame.new(focus)
+
+	-- Moon (relative to Terra) -- only while in Terra's SOI.
+	self:_drawMoon(info, focus, s, mk)
 
 	-- Orbit line; segments below the surface go red (impact warning).
 	local pts = self._simPath

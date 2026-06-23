@@ -20,6 +20,21 @@ Config.BODY = {
 	lodColor = Color3.fromRGB(56, 102, 146), -- distant ocean-blue tint (reads as a world from space)
 }
 
+-- A second body: a Mun-style moon orbiting Terra with its own sphere of influence
+-- (SOI) and gravity. Patched conics: outside the SOI you orbit Terra; cross into the
+-- SOI and the flight switches to a two-body orbit around the moon. It orbits in the
+-- launch plane (Y/Z) so a polar ascent is coplanar with it -- you can actually fly
+-- there with a well-timed prograde burn. Airless: land it propulsively (no chutes).
+Config.MOON = {
+	name = "Mun",
+	radius = 2600,
+	mu = 2.0e7, -- surface gravity ~3 studs/s^2
+	orbitRadius = 60000, -- distance from Terra's centre (render-safe, no origin rebase)
+	phase = 1.4, -- starting angle in its orbit (radians)
+	color = Color3.fromRGB(150, 150, 158),
+	-- soi is derived in FlightController: orbitRadius * (mu/Terra.mu)^(2/5)
+}
+
 -- Render-distance terrain. The planet's surface is a single deterministic Perlin
 -- biome+heightfield (see Shared.Planet); it is NOT generated on the fly. Real Roblox
 -- terrain is laid in fixed world-space chunks that load when within renderDistance of

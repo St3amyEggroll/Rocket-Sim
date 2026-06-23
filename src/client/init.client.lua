@@ -26,6 +26,7 @@ local initOrder = {
 	"FlightController",
 	"CameraController",
 	"PlanetRenderer",
+	"MoonRenderer",
 	"CraftRenderer",
 	"SkyController",
 	"CrewController",
@@ -48,6 +49,7 @@ local startOrder = {
 	"InputController",
 	"CameraController",
 	"PlanetRenderer",
+	"MoonRenderer",
 	"CraftRenderer",
 	"SkyController",
 	"CrewController",
@@ -92,4 +94,4 @@ for _, name in ipairs(startOrder) do
 	end
 end
 
-print("[RocketSim] Client systems started -- 1.0.1 (per-section fuel gauges, over-the-side radial snapping, side-mount radial decouplers).")
+print("[RocketSim] Client systems started -- 1.0.1 (Mun + SOI patched conics, no booster crossfeed, new parts/parachutes, icon staging chips).")

@@ -80,14 +80,15 @@ function CameraController:_update(state, info)
 	end
 
 	if self._input:GetMapMode() then
-		local target = self._origin:ToRender(Orbit.vec(0, 0, 0))
+		local bc = (info and info.bodyCenter) or Orbit.vec(0, 0, 0)
+		local target = self._origin:ToRender(bc)
 		local cosE = math.cos(orbit.elevation)
 		local dir = Vector3.new(
 			math.cos(orbit.azimuth) * cosE,
 			math.sin(orbit.elevation),
 			math.sin(orbit.azimuth) * cosE
 		)
-		local R = self._bodyRadius or 500
+		local R = (info and info.bodyRadius) or self._bodyRadius or 500
 		local frameR = (info and info.mapFrameRadius) or R * 2
 		frameR = math.max(frameR, R * 1.4)
 		local distance = frameR * Config.CAMERA.mapCamMultiplier * orbit.mapZoom
@@ -114,7 +115,9 @@ function CameraController:_update(state, info)
 	end
 	self._lastFwd = fwd
 
-	local craftRender = self._origin:ToRender(p)
+	-- Render at the Terra-centric position (state is relative to the active body).
+	local bc = (info and info.bodyCenter) or Orbit.vec(0, 0, 0)
+	local craftRender = self._origin:ToRender(Orbit.vec(p.x + bc.x, p.y + bc.y, p.z + bc.z))
 	local behind = CFrame.fromAxisAngle(up, orbit.azimuth) * (-fwd)
 	local offsetDir = behind * math.cos(orbit.elevation) + up * math.sin(orbit.elevation)
 	local camPos = craftRender + offsetDir * orbit.distance
