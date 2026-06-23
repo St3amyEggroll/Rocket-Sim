@@ -230,7 +230,7 @@ function StagingController:_makeRow(stage, chips, current, stageCount)
 	row.BorderSizePixel = 0
 	row.LayoutOrder = stage
 	row.Parent = self._list
-	corner(row, 6)
+	corner(row, 9)
 	if isNext or isLive then
 		local stroke = Instance.new("UIStroke")
 		stroke.Color = isLive and LIVE or NEXT

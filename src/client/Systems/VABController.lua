@@ -264,8 +264,10 @@ function VABController:_buildPalette(gui)
 	scroller.CanvasSize = UDim2.new()
 	scroller.AutomaticCanvasSize = Enum.AutomaticSize.Y
 	scroller.Parent = pane
-	local pl = Instance.new("UIListLayout")
-	pl.Padding = UDim.new(0, 6)
+	local pl = Instance.new("UIGridLayout")
+	pl.CellSize = UDim2.fromOffset(69, 82)
+	pl.CellPadding = UDim2.fromOffset(7, 7)
+	pl.SortOrder = Enum.SortOrder.LayoutOrder
 	pl.Parent = scroller
 	self._paletteList = scroller
 end
@@ -280,59 +282,130 @@ function VABController:_renderPalette()
 		card:Destroy()
 	end
 	self._partCards = {}
+	local order = 0
 	for _, id in ipairs(Catalog.order) do
 		local def = Catalog.get(id)
 		if def.category == self._activeCat then
-			self:_addPartCard(def, id)
+			order += 1
+			self:_addPartTile(def, id, order)
 		end
 	end
 end
 
-function VABController:_addPartCard(def, id)
-	local b = Instance.new("TextButton")
-	b.Size = UDim2.new(1, 0, 0, 50)
-	b.BackgroundColor3 = ROW
-	b.AutoButtonColor = true
-	b.BorderSizePixel = 0
-	b.Text = ""
-	b.Parent = self._paletteList
-	corner(b, 6)
+-- Build a part's 3D geometry (centred at the origin, standing along +Y) into `model`, so
+-- it can be shown as a real thumbnail in a ViewportFrame -- KSP-style icon tiles.
+local function thumbCyl(model, h, r, color, mat, y)
+	local p = Instance.new("Part")
+	p.Anchored, p.CanCollide, p.CastShadow = true, false, false
+	p.Shape = Enum.PartType.Cylinder
+	p.Size = Vector3.new(h, r * 2, r * 2)
+	p.Color = color
+	p.Material = mat
+	p.CFrame = CFrame.new(0, y, 0) * CFrame.Angles(0, 0, math.rad(90))
+	p.Parent = model
+end
+local function thumbBall(model, sx, sy, sz, color, y)
+	local p = Instance.new("Part")
+	p.Anchored, p.CanCollide, p.CastShadow = true, false, false
+	p.Shape = Enum.PartType.Ball
+	p.Size = Vector3.new(sx, sy, sz)
+	p.Color = color
+	p.Material = Enum.Material.SmoothPlastic
+	p.CFrame = CFrame.new(0, y, 0)
+	p.Parent = model
+end
 
+function VABController:_buildPreviewGeometry(model, def)
+	local r = def.radius or 1
+	local h = math.max(def.height or 0, 1)
+	local metal = Enum.Material.Metal
+	local plastic = Enum.Material.SmoothPlastic
+	local sh = def.shape
+	if sh == "pod" then
+		thumbCyl(model, h, r, def.color, plastic, 0)
+		thumbBall(model, r * 1.8, r * 1.4, r * 1.8, def.color, h * 0.5)
+	elseif sh == "engine" then
+		thumbCyl(model, h, r, def.color, metal, 0)
+		thumbCyl(model, h * 0.5, r * 0.66, Color3.fromRGB(40, 42, 48), metal, -h * 0.55)
+	elseif sh == "parachute" then
+		thumbCyl(model, h, r, def.color, plastic, -h * 0.2)
+		thumbBall(model, r * 1.7, r * 1.0, r * 1.7, def.color, h * 0.4)
+	elseif sh == "fins" then
+		thumbCyl(model, 2.4, r * 0.5, Color3.fromRGB(150, 150, 158), metal, 0)
+		for i = 0, 2 do
+			local a = i * (2 * math.pi / 3)
+			local dir = Vector3.new(math.cos(a), 0, math.sin(a))
+			local blade = Instance.new("Part")
+			blade.Anchored, blade.CanCollide, blade.CastShadow = true, false, false
+			blade.Shape = Enum.PartType.Block
+			blade.Size = Vector3.new(r * 1.3, 2.4, 0.3)
+			blade.Color = def.color
+			blade.Material = metal
+			blade.CFrame = CFrame.fromMatrix(dir * (r * 0.7), dir, Vector3.yAxis)
+			blade.Parent = model
+		end
+	else
+		thumbCyl(model, h, r, def.color, (def.category == "engine") and metal or plastic, 0)
+	end
+end
+
+function VABController:_addPartTile(def, id, order)
+	local tile = Instance.new("TextButton")
+	tile.BackgroundColor3 = ROW
+	tile.AutoButtonColor = true
+	tile.BorderSizePixel = 0
+	tile.Text = ""
+	tile.LayoutOrder = order
+	tile.Parent = self._paletteList
+	corner(tile, 6)
+
+	-- Category stripe across the top.
 	local stripe = Instance.new("Frame")
-	stripe.Size = UDim2.new(0, 5, 1, -10)
-	stripe.Position = UDim2.fromOffset(6, 5)
+	stripe.Size = UDim2.new(1, 0, 0, 3)
 	stripe.BackgroundColor3 = CAT_COLOR[def.category] or DIM
 	stripe.BorderSizePixel = 0
-	stripe.Parent = b
-	corner(stripe, 3)
+	stripe.Parent = tile
+
+	-- 3D thumbnail.
+	local vf = Instance.new("ViewportFrame")
+	vf.Size = UDim2.new(1, -6, 0, 54)
+	vf.Position = UDim2.fromOffset(3, 5)
+	vf.BackgroundColor3 = Color3.fromRGB(13, 15, 21)
+	vf.BorderSizePixel = 0
+	vf.Ambient = Color3.fromRGB(150, 152, 162)
+	vf.LightColor = Color3.fromRGB(255, 252, 244)
+	vf.LightDirection = Vector3.new(-1, -1.2, -0.7)
+	vf.Parent = tile
+	corner(vf, 5)
+
+	local model = Instance.new("Model")
+	self:_buildPreviewGeometry(model, def)
+	model.Parent = vf
+	local cam = Instance.new("Camera")
+	cam.FieldOfView = 26
+	cam.Parent = vf
+	vf.CurrentCamera = cam
+	local span = math.max(def.height or 0, (def.radius or 1) * 2, 1.5)
+	local dir = Vector3.new(0.65, 0.42, 1).Unit
+	cam.CFrame = CFrame.lookAt(dir * (span * 3.0 + 3), Vector3.zero)
 
 	local name = Instance.new("TextLabel")
-	name.Size = UDim2.new(1, -24, 0, 20)
-	name.Position = UDim2.fromOffset(18, 6)
+	name.Size = UDim2.new(1, -4, 0, 18)
+	name.Position = UDim2.new(0, 2, 1, -19)
 	name.BackgroundTransparency = 1
 	name.Font = Enum.Font.GothamBold
-	name.TextSize = 14
-	name.TextXAlignment = Enum.TextXAlignment.Left
+	name.TextSize = 10
+	name.TextScaled = false
+	name.TextWrapped = true
 	name.TextColor3 = TEXT
 	name.Text = def.name
-	name.Parent = b
-
-	local hint = Instance.new("TextLabel")
-	hint.Size = UDim2.new(1, -24, 0, 16)
-	hint.Position = UDim2.fromOffset(18, 27)
-	hint.BackgroundTransparency = 1
-	hint.Font = Enum.Font.Code
-	hint.TextSize = 11
-	hint.TextXAlignment = Enum.TextXAlignment.Left
-	hint.TextColor3 = DIM
-	hint.Text = "hold + drag into the world"
-	hint.Parent = b
+	name.Parent = tile
 
 	-- Press (not click) begins dragging a new part; release in the world drops it.
-	b.MouseButton1Down:Connect(function()
+	tile.MouseButton1Down:Connect(function()
 		self:_beginDragNew(id)
 	end)
-	table.insert(self._partCards, b)
+	table.insert(self._partCards, tile)
 end
 
 function VABController:_buildRight(gui)
