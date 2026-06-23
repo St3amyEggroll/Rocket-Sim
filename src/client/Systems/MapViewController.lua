@@ -150,11 +150,11 @@ function MapViewController:_buildPool()
 	for i = 1, 48 do
 		self._moonRing[i] = newPart(Color3.fromRGB(120, 124, 140))
 	end
-	-- Unit circle in the Y/Z plane (the moon's orbit plane); scaled by the orbit radius.
+	-- Unit circle in the X/Z plane (the moon's equatorial orbit plane); scaled by radius.
 	self._unitCircle = {}
 	for i = 0, 48 do
 		local a = (i / 48) * 2 * math.pi
-		self._unitCircle[i + 1] = Vector3.new(0, math.cos(a), math.sin(a))
+		self._unitCircle[i + 1] = Vector3.new(math.cos(a), 0, math.sin(a))
 	end
 end
 

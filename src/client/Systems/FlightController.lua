@@ -435,7 +435,10 @@ function FlightController:_step(rawDt)
 					-- a_drag = -k * densityFrac * |v| * v  (opposes velocity)
 					local rho = math.exp(-math.max(alt2, 0) / A.scaleHeight)
 					local speed = math.sqrt(v2.x * v2.x + v2.y * v2.y + v2.z * v2.z)
-					local d = -k * rho * speed
+					-- Clamp the drag coefficient so a fully-deployed parachute (huge drag at
+					-- speed) can't overshoot the integrator and fling the craft -- it just
+					-- decelerates hard and smoothly. (|d|*dt <= 1 keeps RK4 stable.)
+					local d = -math.min(k * rho * speed, 1 / math.max(dt, 1e-3))
 					ax += v2.x * d
 					ay += v2.y * d
 					az += v2.z * d
