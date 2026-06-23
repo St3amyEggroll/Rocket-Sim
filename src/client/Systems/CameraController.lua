@@ -95,8 +95,9 @@ function CameraController:_update(state, info)
 	end
 
 	if self._input:GetMapMode() then
-		local bc = (info and info.bodyCenter) or Orbit.vec(0, 0, 0)
-		local target = self._origin:ToRender(bc)
+		-- The map schematic is drawn at the world origin (MapViewController), so aim there --
+		-- not at the active body's real position, which can be ~900k studs out in solar orbit.
+		local target = self._origin:ToRender(Orbit.vec(0, 0, 0))
 		local cosE = math.cos(orbit.elevation)
 		local dir = Vector3.new(
 			math.cos(orbit.azimuth) * cosE,

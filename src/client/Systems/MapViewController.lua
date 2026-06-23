@@ -279,7 +279,10 @@ function MapViewController:_update(state, info)
 		self._needRecompute = false
 	end
 
-	local focus = self._origin:ToRender(info.bodyCenter or Orbit.vec(0, 0, 0))
+	-- The map is a SCHEMATIC: draw it at the world origin regardless of where the active
+	-- body actually is (in solar orbit bodyCenter is ~900k studs out -- too far to render).
+	-- Everything (orbit, markers, the secondary body) is positioned relative to this focus.
+	local focus = self._origin:ToRender(Orbit.vec(0, 0, 0))
 	local s = info.mapScale or 1
 	local function projVec(v)
 		return focus + v * s

@@ -131,9 +131,11 @@ Config.SKY = {
 	groundBrightness = 2.6,
 	spaceBrightness = 1.7,
 	groundAmbient = Color3.fromRGB(80, 84, 96),
-	spaceAmbient = Color3.fromRGB(44, 48, 60), -- lights the craft; the dark sky is from ClockTime, not ambient
+	-- The planet/craft are lit by ambient in space (the sun is down for stars). Kept moderate
+	-- so the SmoothPlastic biome tiles still read from orbit without looking self-lit.
+	spaceAmbient = Color3.fromRGB(82, 88, 102),
 	groundOutdoor = Color3.fromRGB(150, 152, 160),
-	spaceOutdoor = Color3.fromRGB(56, 60, 74),
+	spaceOutdoor = Color3.fromRGB(86, 92, 106),
 	atmoDensity = 0.32, -- Atmosphere instance density at sea level
 	-- Map view always looks like space (no atmosphere fog) regardless of altitude.
 	mapAmbient = Color3.fromRGB(74, 78, 92),

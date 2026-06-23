@@ -26,9 +26,13 @@ local BASE = 2048
 
 function SunRenderer:Init()
 	self._radius = Config.SUN.radius
-	-- Pulled in if farther than this; otherwise drawn at true position. Terra's orbit is
-	-- huge, so in practice the Sun is almost always in the pulled-in regime.
-	self._maxRender = Config.SUN.radius + Config.CAMERA.distanceMax + 4000
+	-- The Sun is always far (Terra's orbit is huge), so it is always pulled in. The pull
+	-- distance must stay inside Roblox's proxy-part draw range (the planet renders out to
+	-- ~radius+distanceMax+4000 ~ 23k), so we pull the Sun to a fixed distance JUST inside
+	-- that -- its angular size is preserved by the scale factor regardless of the distance.
+	-- (At its true radius the old +radius term pushed this to ~73k, past the draw range, so
+	-- the Sun never appeared.)
+	self._maxRender = Config.CAMERA.distanceMax + 11000
 end
 
 function SunRenderer:_makeSphere(name, color, material, transparency)

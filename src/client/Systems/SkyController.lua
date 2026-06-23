@@ -67,8 +67,10 @@ function SkyController:_setupSky()
 	local atmo = Lighting:FindFirstChildOfClass("Atmosphere") or Instance.new("Atmosphere")
 	atmo.Color = Color3.fromRGB(199, 209, 255)
 	atmo.Decay = Color3.fromRGB(92, 120, 180)
-	atmo.Glare = 0.3
-	atmo.Haze = 2.4
+	-- No glare and only light haze: the glare put a bright band on the horizon toward the
+	-- sun, which read as a "light/dark line down the middle" during the climb.
+	atmo.Glare = 0
+	atmo.Haze = 0.6
 	atmo.Density = Config.SKY.atmoDensity
 	atmo.Parent = Lighting
 	self._atmo = atmo
@@ -94,15 +96,19 @@ function SkyController:_update()
 
 	-- Atmosphere (blue, day) -> Space (dark, stars).
 	local t = math.clamp((self._alt - SKY.blendStartAlt) / (SKY.blendEndAlt - SKY.blendStartAlt), 0, 1)
-	Lighting.ClockTime = SKY.dayClockTime + (SKY.spaceClockTime - SKY.dayClockTime) * t
+	-- Reach FULL night early in the climb (by ~40% of the blend) and hold it, so the whole
+	-- upper ascent is uniformly dark instead of sitting in a banded dusk "right before space".
+	-- The brief dusk only happens low down, where thick atmosphere washes it out.
+	local tNight = math.clamp(t / 0.4, 0, 1)
+	Lighting.ClockTime = SKY.dayClockTime + (SKY.spaceClockTime - SKY.dayClockTime) * tNight
 	Lighting.Brightness = SKY.groundBrightness + (SKY.spaceBrightness - SKY.groundBrightness) * t
 	Lighting.Ambient = SKY.groundAmbient:Lerp(SKY.spaceAmbient, t)
 	Lighting.OutdoorAmbient = SKY.groundOutdoor:Lerp(SKY.spaceOutdoor, t)
 
 	if self._atmo then
 		self._atmo.Density = SKY.atmoDensity * (1 - t)
-		self._atmo.Haze = 2.4 * (1 - t)
-		self._atmo.Glare = 0.3 * (1 - t)
+		self._atmo.Haze = 0.6 * (1 - t)
+		self._atmo.Glare = 0
 	end
 end
 
