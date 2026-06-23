@@ -53,6 +53,21 @@ local function block(model, size, color, mat, cf)
 	return part(model, { Shape = Enum.PartType.Block, Size = size, Color = color, Material = mat or SMOOTH, CFrame = cf })
 end
 
+-- A thin rod between two points (for the radial decoupler's support struts).
+local function rod(model, a, b, thick, color)
+	local len = (b - a).Magnitude
+	if len < 1e-3 then
+		return
+	end
+	return part(model, {
+		Shape = Enum.PartType.Block,
+		Size = Vector3.new(thick, thick, len),
+		Color = color,
+		Material = METAL,
+		CFrame = CFrame.lookAt((a + b) * 0.5, b),
+	})
+end
+
 -- Build a part's geometry into `model`, centred at the origin, standing along +Y.
 function PartPreview.geometry(model, def)
 	local r = def.radius or 1
@@ -72,9 +87,26 @@ function PartPreview.geometry(model, def)
 		cyl(model, h, r, def.color, SMOOTH, -h * 0.1)
 		ball(model, r * 1.5, r * 0.8, r * 1.5, Color3.fromRGB(220, 96, 76), SMOOTH, h * 0.45)
 	elseif sh == "decoupler" then
-		local dh = math.max(h, 0.8)
-		cyl(model, dh, r, def.color, METAL, 0)
-		cyl(model, dh * 0.42, r * 1.04, Color3.fromRGB(232, 184, 44), METAL, 0) -- yellow band
+		if def.radial then
+			-- KSP-style radial decoupler: a flat black mount, a yellow indicator, and gray
+			-- support struts splaying out. Built along +X (= outward when placed on a craft).
+			block(model, Vector3.new(0.7, 2.4, 1.3), Color3.fromRGB(26, 26, 30), SMOOTH, CFrame.new(0.15, 0, 0))
+			block(model, Vector3.new(0.24, 0.55, 0.55), Color3.fromRGB(236, 190, 40), SMOOTH, CFrame.new(0.5, 0.35, 0))
+			block(model, Vector3.new(0.24, 0.55, 0.55), Color3.fromRGB(20, 20, 24), SMOOTH, CFrame.new(0.5, -0.45, 0))
+			local arm = STEEL
+			local function strut(y2, z2)
+				rod(model, Vector3.new(0.12, y2 * 0.35, 0), Vector3.new(0.14, y2, z2), 0.16, arm)
+				block(model, Vector3.new(0.34, 0.34, 0.34), arm, METAL, CFrame.new(0.14, y2, z2))
+			end
+			strut(1.45, 1.05)
+			strut(1.45, -1.05)
+			strut(-1.45, 1.05)
+			strut(-1.45, -1.05)
+		else
+			local dh = math.max(h, 0.8)
+			cyl(model, dh, r, def.color, METAL, 0)
+			cyl(model, dh * 0.42, r * 1.04, Color3.fromRGB(232, 184, 44), METAL, 0) -- yellow band
+		end
 	elseif sh == "fins" then
 		cyl(model, 2.6, r * 0.4, STEEL, METAL, 0)
 		for i = 0, 2 do

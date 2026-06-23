@@ -37,6 +37,17 @@ local PlanetRenderer = {}
 -- entirely by mesh.Scale = renderedDiameter / BASE.
 local BASE = 2048
 
+-- A CFrame at `pos` whose UP axis is `up` (a tile tangent to the sphere faces outward).
+local function frameFromUp(pos, up)
+	up = (up.Magnitude > 1e-3) and up.Unit or Vector3.yAxis
+	local ref = (math.abs(up.Y) < 0.99) and Vector3.yAxis or Vector3.xAxis
+	local fwd = up:Cross(ref)
+	if fwd.Magnitude < 1e-3 then
+		fwd = up:Cross(Vector3.xAxis)
+	end
+	return CFrame.lookAt(pos, pos + fwd.Unit, up)
+end
+
 function PlanetRenderer:Init()
 	self._trueRadius = Planet.lodRadius()
 	self._atmoRadius = Config.BODY.radius + Config.ATMOSPHERE.top
@@ -76,6 +87,10 @@ function PlanetRenderer:Start()
 	-- Translucent atmosphere shell (purely cosmetic), drawn concentric with the body.
 	self._atmo, self._atmoMesh = self:_makeSphere("Atmosphere", Config.ATMOSPHERE.color, Enum.Material.ForceField, 0.5)
 
+	-- Biome shell: a layer of land-colored tiles over the base (ocean) sphere, so you see
+	-- continents from orbit.
+	self:_buildBiomeShell()
+
 	-- Update after the camera has been positioned for this frame.
 	RunService:BindToRenderStep("RocketSim_Planet", Enum.RenderPriority.Camera.Value + 2, function()
 		self:_update()
@@ -87,6 +102,52 @@ function PlanetRenderer:_apply(mesh, part, diameter, center)
 	local s = diameter / BASE
 	mesh.Scale = Vector3.new(s, s, s)
 	part.CFrame = CFrame.new(center)
+end
+
+-- Build the biome shell: a layer of land-colored tiles over the base (ocean) sphere, laid
+-- at the LOD radius (just under the surface, so streamed terrain covers them up close).
+-- Oceans are left to the base sphere, so only land cells become tiles.
+function PlanetRenderer:_buildBiomeShell()
+	local folder = Instance.new("Folder")
+	folder.Name = "BiomeShell"
+	self._shell = folder
+	self._shellVisible = false
+
+	local R = self._trueRadius
+	local Nlat = Config.LOD.latBands
+	local lonBands = Config.LOD.lonBands
+	local cellH = (math.pi * R) / Nlat
+	for i = 0, Nlat - 1 do
+		local lat = -math.pi / 2 + (i + 0.5) * (math.pi / Nlat)
+		local cl, sl = math.cos(lat), math.sin(lat)
+		local Nlon = math.max(3, math.floor(lonBands * cl + 0.5))
+		local cellW = (2 * math.pi * R * cl) / Nlon
+		for j = 0, Nlon - 1 do
+			local lon = (j + 0.5) * (2 * math.pi / Nlon)
+			local dx, dy, dz = cl * math.cos(lon), sl, cl * math.sin(lon)
+			if not Planet.isOceanUnit(dx, dy, dz) then
+				local dir = Vector3.new(dx, dy, dz)
+				local tile = Instance.new("Part")
+				tile.Anchored = true
+				tile.CanCollide = false
+				tile.CanQuery = false
+				tile.CanTouch = false
+				tile.CastShadow = false
+				tile.Size = Vector3.new(cellW * 1.5 + 6, 2, cellH * 1.5 + 6)
+				tile.Color = Planet.lodColorForUnit(dx, dy, dz)
+				tile.Material = Enum.Material.SmoothPlastic
+				tile.CFrame = frameFromUp(dir * (R + 3), dir)
+				tile.Parent = folder
+			end
+		end
+	end
+end
+
+function PlanetRenderer:_setShell(visible)
+	if visible ~= self._shellVisible then
+		self._shellVisible = visible
+		self._shell.Parent = visible and Workspace or nil
+	end
 end
 
 function PlanetRenderer:_update()
@@ -101,6 +162,7 @@ function PlanetRenderer:_update()
 			self._ball.Transparency = 1
 			self._atmo.Transparency = 1
 		end
+		self:_setShell(false)
 		return
 	elseif self._ball.Transparency ~= 0 then
 		self._ball.Transparency = 0
@@ -111,6 +173,10 @@ function PlanetRenderer:_update()
 	local camPos = cam.CFrame.Position
 	local toPlanet = center - camPos
 	local dist = toPlanet.Magnitude
+
+	-- Show the biome tiles only within render range (in orbit, where you'd see them); far
+	-- out the planet is just a dot, so fall back to the plain ocean sphere.
+	self:_setShell(dist <= self._maxRender)
 
 	local renderCenter, scale
 	if dist <= self._maxRender or dist < 1e-3 then

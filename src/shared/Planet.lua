@@ -118,6 +118,33 @@ function Planet.seaLevel(): number
 	return R
 end
 
+-- Is the surface beneath this unit direction ocean? (Used by the from-space LOD.)
+function Planet.isOceanUnit(ux: number, uy: number, uz: number): boolean
+	local _, _, isOcean = Planet.sample(ux, uy, uz)
+	return isOcean
+end
+
+-- A flat LOD colour for a unit direction -- the biome's "from orbit" colour, so the
+-- distant planet shows continents / deserts / ice instead of a single tint.
+local LOD_OCEAN = Config.BODY.lodColor or Color3.fromRGB(56, 102, 146)
+local LOD_GRASS = Color3.fromRGB(84, 138, 72)
+local LOD_SAND = Color3.fromRGB(206, 188, 138)
+local LOD_ROCK = Color3.fromRGB(120, 116, 110)
+local LOD_SNOW = Color3.fromRGB(232, 236, 240)
+function Planet.lodColorForUnit(ux: number, uy: number, uz: number): Color3
+	local _, material, isOcean = Planet.sample(ux, uy, uz)
+	if isOcean then
+		return LOD_OCEAN
+	elseif material == SNOW then
+		return LOD_SNOW
+	elseif material == SAND then
+		return LOD_SAND
+	elseif material == ROCK then
+		return LOD_ROCK
+	end
+	return LOD_GRASS
+end
+
 -- The LOD sphere radius: just below the deepest crust (ocean sits at sea level, so
 -- the lowest solid is the ocean crust bottom) so the body never pokes up through it.
 function Planet.lodRadius(): number

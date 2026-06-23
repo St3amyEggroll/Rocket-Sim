@@ -126,6 +126,16 @@ Config.MAP = {
 	frameSize = 8000,
 }
 
+-- From-space LOD: the distant planet is a base ocean sphere with a shell of biome-colored
+-- land tiles laid over it (sampled from Planet), so you see continents / deserts / ice
+-- from orbit. The tiles only show within the planet's render range (in orbit, where they
+-- matter); far out it falls back to the plain ocean dot. Higher bands = finer continents
+-- but more parts.
+Config.LOD = {
+	latBands = 18, -- latitude rings of tiles (pole to pole)
+	lonBands = 48, -- longitude tiles at the equator (fewer toward the poles)
+}
+
 Config.CRAFT = {
 	radius = 14,
 	riderHeight = 7,
