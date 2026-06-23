@@ -163,6 +163,9 @@ end
 function InputController:GetSAS()
 	return self._sas
 end
+function InputController:SetSAS(mode)
+	self._sas = mode
+end
 function InputController:GetTimeWarp()
 	return self._warpLevels[self._warpIndex]
 end
