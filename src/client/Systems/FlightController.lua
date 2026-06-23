@@ -67,6 +67,20 @@ function FlightController:Init()
 		soi = m.orbitRadius * (m.mu / body.mu) ^ (2 / 5),
 	}
 
+	-- The Sun (root body): Terra orbits it on rails. Terra's SOI is derived the same way
+	-- the Mun's is; beyond it the craft falls into a heliocentric orbit around the Sun.
+	local s = Config.SUN
+	self._sun = {
+		name = s.name,
+		mu = s.mu,
+		radius = s.radius,
+		orbitRadius = s.orbitRadius,
+		color = s.color,
+		phase = s.phase or 0,
+		w = math.sqrt(s.mu / (s.orbitRadius * s.orbitRadius * s.orbitRadius)),
+	}
+	self._planetSoi = s.orbitRadius * (body.mu / s.mu) ^ (2 / 5)
+
 	self._turnStart = Config.LAUNCH.turnStartAlt
 	self._turnEnd = Config.LAUNCH.turnEndAlt
 	-- Launch site on the equator (unit direction), sitting on the terrain height there.
@@ -163,11 +177,38 @@ function FlightController:_moonStateAt(t)
 	return Orbit.vec(r * ca, 0, r * sa), Orbit.vec(-r * m.w * sa, 0, r * m.w * ca)
 end
 
+-- Terra's HELIOCENTRIC state (position, velocity) at mission time t: a circular orbit
+-- around the Sun in the X/Z plane. (The Sun's Terra-centric position is just -this.)
+function FlightController:_terraStateAt(t)
+	local s = self._sun
+	local a = s.phase + s.w * t
+	local ca, sa = math.cos(a), math.sin(a)
+	local r = s.orbitRadius
+	return Orbit.vec(r * ca, 0, r * sa), Orbit.vec(-r * s.w * sa, 0, r * s.w * ca)
+end
+
+-- Switch the active central body, updating mu / radius / name (state conversion is done
+-- by the caller). Never leaves the craft flagged as landed.
+function FlightController:_setBody(id)
+	self._bodyId = id
+	if id == "moon" then
+		self._mu, self._bodyRadius, self._bodyName = self._moon.mu, self._moon.radius, self._moon.name
+	elseif id == "sun" then
+		self._mu, self._bodyRadius, self._bodyName = self._sun.mu, self._sun.radius, self._sun.name
+	else
+		self._mu, self._bodyRadius, self._bodyName = self._planetMu, self._planetRadius, Config.BODY.name
+	end
+	self._landed = false
+end
+
 -- Terra-centric centre / velocity of the active body (zero for Terra itself).
 function FlightController:_bodyCenter()
 	if self._bodyId == "moon" then
 		local p = self:_moonStateAt(self._missionTime)
 		return p
+	elseif self._bodyId == "sun" then
+		local T = self:_terraStateAt(self._missionTime)
+		return Orbit.vec(-T.x, -T.y, -T.z) -- the Sun, seen from Terra
 	end
 	return Orbit.vec(0, 0, 0)
 end
@@ -175,32 +216,48 @@ function FlightController:_bodyVel()
 	if self._bodyId == "moon" then
 		local _, v = self:_moonStateAt(self._missionTime)
 		return v
+	elseif self._bodyId == "sun" then
+		local _, Tv = self:_terraStateAt(self._missionTime)
+		return Orbit.vec(-Tv.x, -Tv.y, -Tv.z)
 	end
 	return Orbit.vec(0, 0, 0)
 end
 
--- Patched conics: hop the sim state between Terra's frame and the moon's frame as the
--- craft crosses the moon's sphere of influence.
+-- Patched conics over a 3-level stack (Sun -> Terra -> Mun). The sim state is kept
+-- relative to the ACTIVE body; crossing a sphere-of-influence boundary re-expresses it in
+-- the neighbouring body's frame:
+--   moon  -> planet : add the moon's Terra-centric state    (state was moon-relative)
+--   planet-> moon   : subtract it                            (state was Terra-centric)
+--   planet-> sun    : add Terra's heliocentric state         (escape into solar orbit)
+--   sun   -> planet : subtract it                            (capture back into Terra's SOI)
 function FlightController:_checkSOI()
-	if self._bodyId == "planet" then
-		local mpos, mvel = self:_moonStateAt(self._missionTime)
+	local t = self._missionTime
+	if self._bodyId == "moon" then
+		if vlen(self._state.position) > self._moon.soi then
+			local mpos, mvel = self:_moonStateAt(t)
+			self._state = { position = vadd(self._state.position, mpos), velocity = vadd(self._state.velocity, mvel) }
+			self:_setBody("planet")
+		end
+	elseif self._bodyId == "planet" then
+		local mpos, mvel = self:_moonStateAt(t)
 		local rel = vsub(self._state.position, mpos) -- planet-frame: state IS Terra-centric
 		if vlen(rel) < self._moon.soi then
 			self._state = { position = rel, velocity = vsub(self._state.velocity, mvel) }
-			self._bodyId = "moon"
-			self._mu = self._moon.mu
-			self._bodyRadius = self._moon.radius
-			self._bodyName = self._moon.name
-			self._landed = false
+			self:_setBody("moon")
+		elseif vlen(self._state.position) > self._planetSoi then
+			-- Escaped Terra's SOI: convert Terra-centric state to heliocentric (Sun frame).
+			local T, Tv = self:_terraStateAt(t)
+			self._state = { position = vadd(self._state.position, T), velocity = vadd(self._state.velocity, Tv) }
+			self:_setBody("sun")
 		end
-	elseif vlen(self._state.position) > self._moon.soi then
-		local mpos, mvel = self:_moonStateAt(self._missionTime)
-		self._state = { position = vadd(self._state.position, mpos), velocity = vadd(self._state.velocity, mvel) }
-		self._bodyId = "planet"
-		self._mu = self._planetMu
-		self._bodyRadius = self._planetRadius
-		self._bodyName = Config.BODY.name
-		self._landed = false
+	elseif self._bodyId == "sun" then
+		-- Heliocentric: the craft is captured when it falls inside Terra's SOI.
+		local T, Tv = self:_terraStateAt(t)
+		local relTerra = vsub(self._state.position, T) -- craft, Terra-centric
+		if vlen(relTerra) < self._planetSoi then
+			self._state = { position = relTerra, velocity = vsub(self._state.velocity, Tv) }
+			self:_setBody("planet")
+		end
 	end
 end
 
@@ -369,6 +426,16 @@ function FlightController:_fire(extra)
 	extra.moonRadius = self._moon.radius
 	extra.moonSoi = self._moon.soi
 	extra.moonColor = self._moon.color
+	-- Sun context: its Terra-centric position (for SunRenderer), the live sun direction
+	-- (for the planet's day/night terminator), Terra's SOI, and Terra's heliocentric
+	-- position (so the map can place Terra when you're in solar orbit).
+	local T = self:_terraStateAt(self._missionTime)
+	extra.sunCenter = Orbit.vec(-T.x, -T.y, -T.z)
+	extra.sunRadius = self._sun.radius
+	extra.sunColor = self._sun.color
+	extra.sunDir = self:GetSunDir()
+	extra.planetSoi = self._planetSoi
+	extra.terraCenter = T
 	self.Updated:Fire(self._state, extra)
 end
 
@@ -495,6 +562,12 @@ end
 -- just the engine). If the deepest point has reached the terrain, rest the craft on
 -- it (slow) or destroy it (impact faster than the crash speed).
 function FlightController:_checkTouchdown()
+	-- The Sun is not landable -- skip terrain collision entirely while in solar orbit.
+	if self._bodyId == "sun" then
+		self._landed = false
+		return
+	end
+
 	local p = self._state.position
 	local nose = self._attitude.LookVector -- base -> nose, unit
 	local len = self._vehicle:GetRotProfile().length
@@ -559,6 +632,21 @@ function FlightController:GetMoonCenter()
 end
 function FlightController:GetMoonRadius()
 	return self._moon.radius
+end
+-- The Sun's current Terra-centric position (for SunRenderer) and its size.
+function FlightController:GetSunCenter()
+	local T = self:_terraStateAt(self._missionTime)
+	return Orbit.vec(-T.x, -T.y, -T.z)
+end
+function FlightController:GetSunRadius()
+	return self._sun.radius
+end
+-- The unit direction from Terra to the Sun (the lit hemisphere faces this; drives the
+-- from-space day/night terminator). Sweeps slowly as Terra orbits the Sun.
+function FlightController:GetSunDir()
+	local T = self:_terraStateAt(self._missionTime)
+	local d = unit(Orbit.vec(-T.x, -T.y, -T.z))
+	return d and Vector3.new(d.x, d.y, d.z) or Vector3.new(1, 0, 0)
 end
 -- Sim position of the launch pad base (the VAB build origin; nose points radial-out here).
 function FlightController:GetLaunchPosition()

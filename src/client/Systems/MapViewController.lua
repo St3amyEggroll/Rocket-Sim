@@ -144,7 +144,7 @@ function MapViewController:_buildPool()
 	moon.Size = Vector3.new(10, 10, 10)
 	moon.Parent = folder
 	self._moonMarker = moon
-	markerLabel(moon, Config.MOON.name)
+	self._secondaryLabel = markerLabel(moon, Config.MOON.name)
 
 	self._moonRing = {}
 	for i = 1, 48 do
@@ -207,22 +207,34 @@ function MapViewController:_recompute(state, mu)
 	self._apoR = apoR
 end
 
--- Draw the moon body + its orbit ring relative to Terra (only inside Terra's SOI).
-function MapViewController:_drawMoon(info, focus, s, mk)
-	if info.bodyId ~= "planet" or not info.moonCenter then
+-- Draw the "other" body (and its orbit ring) relative to the active body, so you can aim
+-- a transfer at it: the Mun (relative to Terra) while in Terra's SOI, or Terra (relative to
+-- the Sun) while in solar orbit. Hidden in the moon's SOI.
+function MapViewController:_drawSecondary(info, focus, s, mk)
+	local center, drawRadius, color, label
+	if info.bodyId == "planet" and info.moonCenter then
+		center, drawRadius, color, label = info.moonCenter, info.moonRadius, Config.MOON.color, Config.MOON.name
+	elseif info.bodyId == "sun" and info.terraCenter then
+		center, drawRadius, color, label =
+			info.terraCenter, Config.BODY.radius, (Config.BODY.lodColor or Config.BODY.grassColor), Config.BODY.name
+	end
+	if not center then
 		self._moonMarker.Transparency = 1
 		for _, seg in ipairs(self._moonRing) do
 			seg.Transparency = 1
 		end
 		return
 	end
-	local mc = info.moonCenter
-	self._moonMarker.Transparency = 0
-	local md = math.max((info.moonRadius or 0) * s * 2, mk * 1.4)
-	self._moonMarker.Size = Vector3.new(md, md, md)
-	self._moonMarker.CFrame = CFrame.new(focus + Vector3.new(mc.x, mc.y, mc.z) * s)
 
-	local radius = mag(mc)
+	self._moonMarker.Transparency = 0
+	self._moonMarker.Color = color
+	self._secondaryLabel.Text = label
+	self._secondaryLabel.TextColor3 = color
+	local md = math.max((drawRadius or 0) * s * 2, mk * 1.4)
+	self._moonMarker.Size = Vector3.new(md, md, md)
+	self._moonMarker.CFrame = CFrame.new(focus + Vector3.new(center.x, center.y, center.z) * s)
+
+	local radius = mag(center)
 	local ringThick = math.max((info.bodyRadius or 1) * s * 0.02, 0.05)
 	local prev
 	for i = 1, #self._unitCircle do
@@ -282,11 +294,17 @@ function MapViewController:_update(state, info)
 	local pd = R * s * 2
 	local psc = pd / 2048
 	self._mapPlanetMesh.Scale = Vector3.new(psc, psc, psc)
-	self._mapPlanet.Color = (info.bodyId == "moon") and Config.MOON.color or (Config.BODY.lodColor or Config.BODY.grassColor)
+	local focusColor = Config.BODY.lodColor or Config.BODY.grassColor
+	if info.bodyId == "moon" then
+		focusColor = Config.MOON.color
+	elseif info.bodyId == "sun" then
+		focusColor = Config.SUN.color
+	end
+	self._mapPlanet.Color = focusColor
 	self._mapPlanet.CFrame = CFrame.new(focus)
 
-	-- Moon (relative to Terra) -- only while in Terra's SOI.
-	self:_drawMoon(info, focus, s, mk)
+	-- The other body (Mun in Terra's SOI, or Terra in solar orbit), so you can aim back.
+	self:_drawSecondary(info, focus, s, mk)
 
 	-- Orbit line; segments below the surface go red (impact warning).
 	local pts = self._simPath

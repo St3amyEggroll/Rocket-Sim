@@ -20,6 +20,21 @@ Config.BODY = {
 	lodColor = Color3.fromRGB(56, 102, 146), -- distant ocean-blue tint (reads as a world from space)
 }
 
+-- The Sun: the root of the system. Terra orbits it (circular, in the X/Z equatorial
+-- plane), and the Mun orbits Terra -- a 3-level patched-conic stack (Sun -> Terra -> Mun).
+-- Escape Terra's sphere of influence and you fall into a heliocentric orbit around the
+-- Sun; re-enter and you're captured back. The render frame stays Terra-centric, so the
+-- Sun appears at -Terra(t) and sweeps slowly around the sky (a long day/night cycle).
+-- mu/orbitRadius are tuned so Terra's SOI (~167k) comfortably contains the Mun's orbit.
+Config.SUN = {
+	name = "Sol",
+	radius = 60000, -- drawn as a scaled mesh sphere (SunRenderer)
+	mu = 1.0e11, -- gravitational parameter (root body)
+	orbitRadius = 900000, -- Terra's orbital radius around the Sun (studs)
+	phase = math.pi, -- Terra's starting orbital angle (pi -> launch site faces the Sun = daylight)
+	color = Color3.fromRGB(255, 246, 214), -- warm white star
+}
+
 -- A second body: a Mun-style moon orbiting Terra with its own sphere of influence
 -- (SOI) and gravity. Patched conics: outside the SOI you orbit Terra; cross into the
 -- SOI and the flight switches to a two-body orbit around the moon. It orbits in the
@@ -104,8 +119,11 @@ Config.ATMOSPHERE = {
 -- always render no matter how far the craft is from the world origin.
 Config.SKY = {
 	starCount = 3200,
-	sunAngularSize = 24, -- Roblox native Sun disk size
-	moonAngularSize = 18, -- Roblox native Moon disk size
+	-- The native skybox Sun/Moon discs are hidden (set to 0): the real Sun is its own
+	-- world body (SunRenderer) and the Mun is MoonRenderer -- the painted-on celestial
+	-- bodies would be fake duplicates. Stars stay (CelestialBodiesShown keeps them).
+	sunAngularSize = 0, -- Roblox native Sun disk size (0 = hidden)
+	moonAngularSize = 0, -- Roblox native Moon disk size (0 = hidden)
 	blendStartAlt = 300, -- at/below this altitude the sky is fully atmospheric (blue)
 	blendEndAlt = 2700, -- at/above this altitude the sky is fully space (dark + stars)
 	dayClockTime = 14, -- atmosphere: midday sun, blue sky
@@ -145,7 +163,7 @@ Config.LOD = {
 	-- would leave the planet flat and unlit -- so instead the shell is drawn Neon (self-lit)
 	-- with a day/night terminator BAKED in from a fixed sun direction. No per-frame cost; the
 	-- planet keeps a real sunlit limb + dark night side against the stars.
-	sunDir = Vector3.new(0.55, 0.5, -0.66), -- baked space-sun direction (lit side faces this)
+	sunDir = Vector3.new(1, 0, 0), -- initial space-sun direction (the live Sun direction drives it at runtime)
 	nightShade = 0.16, -- night-side brightness (a touch of earthshine, not pure black)
 	termSoftness = 0.30, -- terminator band half-width (in dot-product units)
 	nightTint = Color3.fromRGB(16, 24, 42), -- cool tint blended into the shadowed side

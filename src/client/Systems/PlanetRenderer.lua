@@ -105,6 +105,21 @@ end
 function PlanetRenderer:Start()
 	self._origin = Registry:Get("FloatingOriginController")
 	self._input = Registry:Get("InputController")
+	self._flight = Registry:Get("FlightController")
+
+	-- Shared day/night terminator parameters (baked into the shells, then rolled to follow
+	-- the live Sun direction as Terra orbits). Collected tiles are re-shaded a chunk per
+	-- frame in _update so a slowly-sweeping (or time-warped) sun stays consistent cheaply.
+	local L = Config.LOD
+	self._litSun = (L.sunDir and L.sunDir.Magnitude > 1e-3) and L.sunDir.Unit or Vector3.new(1, 0, 0)
+	self._litNight = L.nightShade or 0.16
+	self._litSoft = L.termSoftness or 0.30
+	self._litTint = L.nightTint or Color3.fromRGB(16, 24, 42)
+	self._litCloudTint = self._litTint:Lerp(Color3.fromRGB(40, 48, 70), 0.5)
+	self._litOceanSpec = L.oceanSpec or 0.55
+	self._litSpecTight = L.oceanSpecTight or 64
+	self._litTiles = {}
+	self._reshadeCursor = 0
 
 	-- The body is drawn Neon (self-lit): the space sky keeps the sun down for stars, so the
 	-- planet can't be lit conventionally -- instead it shows its baked albedo + terminator
@@ -147,12 +162,9 @@ function PlanetRenderer:_buildBiomeShell()
 	self._shellVisible = false
 
 	local L = Config.LOD
-	local sun = (L.sunDir and L.sunDir.Magnitude > 1e-3) and L.sunDir.Unit or Vector3.new(0.55, 0.5, -0.66).Unit
-	local night = L.nightShade or 0.16
-	local soft = L.termSoftness or 0.30
-	local tint = L.nightTint or Color3.fromRGB(16, 24, 42)
-	local oceanSpec = L.oceanSpec or 0.55
-	local specTight = L.oceanSpecTight or 64
+	local sun = self._litSun
+	local night, soft, tint = self._litNight, self._litSoft, self._litTint
+	local oceanSpec, specTight = self._litOceanSpec, self._litSpecTight
 
 	local R = self._trueRadius
 	local Nlat = L.latBands
@@ -168,11 +180,12 @@ function PlanetRenderer:_buildBiomeShell()
 			local dx, dy, dz = cl * math.cos(lon), sl, cl * math.sin(lon)
 			local dir = Vector3.new(dx, dy, dz)
 			local albedo = Planet.lodColorForUnit(dx, dy, dz)
+			local isOcean = Planet.isOceanUnit(dx, dy, dz)
 
 			-- Baked terminator (sunlit day side -> dark, cool night side).
 			local c, lit, dd = bakedShade(dir, sun, night, soft, tint, albedo)
 			-- Ocean sun-glint: a tight specular hotspot near the sub-solar point.
-			if dd > 0 and Planet.isOceanUnit(dx, dy, dz) then
+			if dd > 0 and isOcean then
 				local s = (dd ^ specTight) * oceanSpec * lit
 				c = Color3.new(math.min(c.R + s * 0.9, 1), math.min(c.G + s * 0.95, 1), math.min(c.B + s, 1))
 			end
@@ -188,6 +201,7 @@ function PlanetRenderer:_buildBiomeShell()
 			tile.Material = Enum.Material.Neon
 			tile.CFrame = frameFromUp(dir * (R + 3), dir)
 			tile.Parent = folder
+			table.insert(self._litTiles, { part = tile, dir = dir, base = albedo, ocean = isOcean })
 		end
 	end
 end
@@ -213,10 +227,9 @@ function PlanetRenderer:_buildCloudShell()
 	self._cloudsVisible = false
 
 	local L = Config.LOD
-	local sun = (L.sunDir and L.sunDir.Magnitude > 1e-3) and L.sunDir.Unit or Vector3.new(0.55, 0.5, -0.66).Unit
-	local night = L.nightShade or 0.16
-	local soft = L.termSoftness or 0.30
-	local tint = (L.nightTint or Color3.fromRGB(16, 24, 42)):Lerp(Color3.fromRGB(40, 48, 70), 0.5)
+	local sun = self._litSun
+	local night, soft = self._litNight, self._litSoft
+	local tint = self._litCloudTint
 	local opacity = L.cloudOpacity or 0.34
 	local cover = L.cloudCover or 0.18 -- fbm threshold (higher = fewer clouds)
 	local freq = L.cloudFreq or 0.0011
@@ -256,6 +269,7 @@ function PlanetRenderer:_buildCloudShell()
 				tile.Transparency = opacity + (1 - opacity) * 0.4 * (1 - thick)
 				tile.CFrame = frameFromUp(dir * R, dir)
 				tile.Parent = folder
+				table.insert(self._litTiles, { part = tile, dir = dir, base = WHITE, cloud = true })
 			end
 		end
 	end
@@ -268,6 +282,40 @@ function PlanetRenderer:_setClouds(visible)
 	if visible ~= self._cloudsVisible then
 		self._cloudsVisible = visible
 		self._clouds.Parent = visible and Workspace or nil
+	end
+end
+
+-- Re-bake one tile's colour for the current sun direction (cheap; called in chunks).
+function PlanetRenderer:_reshadeTile(e, sun)
+	if e.cloud then
+		e.part.Color = (bakedShade(e.dir, sun, self._litNight, self._litSoft, self._litCloudTint, e.base))
+		return
+	end
+	local c, lit, dd = bakedShade(e.dir, sun, self._litNight, self._litSoft, self._litTint, e.base)
+	if dd > 0 and e.ocean then
+		local s = (dd ^ self._litSpecTight) * self._litOceanSpec * lit
+		c = Color3.new(math.min(c.R + s * 0.9, 1), math.min(c.G + s * 0.95, 1), math.min(c.B + s, 1))
+	end
+	e.part.Color = c
+end
+
+-- Roll through the shell + cloud tiles a chunk at a time, re-shading to the live sun
+-- direction so the terminator tracks the Sun as Terra orbits (and under time-warp).
+function PlanetRenderer:_rollReshade()
+	local tiles = self._litTiles
+	local n = tiles and #tiles or 0
+	if n == 0 then
+		return
+	end
+	local sun = self._flight and self._flight:GetSunDir() or self._litSun
+	if not (sun and sun.Magnitude > 1e-3) then
+		return
+	end
+	sun = sun.Unit
+	local chunk = math.min(160, n)
+	for _ = 1, chunk do
+		self._reshadeCursor = (self._reshadeCursor % n) + 1
+		self:_reshadeTile(tiles[self._reshadeCursor], sun)
 	end
 end
 
@@ -338,8 +386,13 @@ function PlanetRenderer:_update()
 	-- Show the biome tiles only from SPACE -- high enough that terrain has unloaded (so they
 	-- never poke through the ground) and still within render range (far out it's just a dot).
 	local fromSpace = dist > (self._surfaceRadius + Config.TERRAIN.streamOutAlt)
-	self:_setShell(not self._textured and fromSpace and dist <= self._maxRender)
+	local shellOn = not self._textured and fromSpace and dist <= self._maxRender
+	self:_setShell(shellOn)
 	self:_setClouds(fromSpace and dist <= self._maxRender)
+	-- Keep the terminator pointed at the live Sun while the shells are on screen.
+	if shellOn then
+		self:_rollReshade()
+	end
 
 	local renderCenter, scale
 	if dist <= self._maxRender or dist < 1e-3 then
