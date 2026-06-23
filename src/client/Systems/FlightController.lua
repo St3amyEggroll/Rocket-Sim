@@ -195,6 +195,23 @@ function FlightController:_updateRotation(dt, pos, vel, powered, throttle)
 		accel -= self._omega * (C.aeroDamp * rho) -- passive pitch damping
 	end
 
+	-- Off-centre thrust: each firing engine pushes along the nose from its own lateral
+	-- position, so an asymmetric engine layout (a lone side booster, an empty booster
+	-- still attached) torques the craft about the centre of mass.
+	if powered and throttle > 0 then
+		local cx, cz = prof.comX or 0, prof.comZ or 0
+		local tx, tz = 0, 0
+		for _, e in ipairs(self._vehicle:GetActiveEngines()) do
+			local dx, dz = e.x - cx, e.z - cz
+			local f = e.thrust * throttle
+			tx += -dz * f -- torque about the body right axis (pitch)
+			tz += dx * f -- torque about the body up axis (yaw)
+		end
+		if tx ~= 0 or tz ~= 0 then
+			accel += (right * tx + up * tz) * (C.thrustTorqueScale / I)
+		end
+	end
+
 	local omega = self._omega + accel * dt
 	if omega.Magnitude > C.maxOmega then
 		omega = omega.Unit * C.maxOmega

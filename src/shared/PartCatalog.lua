@@ -100,6 +100,7 @@ PartCatalog.parts = {
 		color = Color3.fromRGB(94, 96, 104),
 		shape = "decoupler",
 		drag = 0.15,
+		decoupler = true, -- a separation point: firing its stage cuts the stack here
 	},
 	RadialDecoupler = {
 		id = "RadialDecoupler",
@@ -112,6 +113,8 @@ PartCatalog.parts = {
 		shape = "decoupler",
 		drag = 0.1,
 		radial = true, -- surface-attaches to a body's side (holds a side booster)
+		decoupler = true, -- a separation point: firing its stage drops the booster on it
+		-- ...but other parts may still STACK onto it (build the booster off its node).
 	},
 }
 

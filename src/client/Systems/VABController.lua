@@ -424,7 +424,7 @@ function VABController:_buildControls(gui)
 	hint.Font = Enum.Font.Code
 	hint.TextSize = 13
 	hint.TextColor3 = DIM
-	hint.Text = "Hold + drag a part near the rocket -- it snaps to the nearest node  •  C snap on/off  •  X symmetry  •  hold Alt to force-snap  •  drop on the parts list to delete  •  Esc cancels  •  RMB orbit"
+	hint.Text = "Hold + drag a part -- top/bottom STACK-snaps, a side SURFACE-snaps (slides up/down freely)  •  stack onto a radial decoupler to build a side booster  •  set the firing order in STAGING (right)  •  C snap  •  X symmetry  •  Alt force-snap  •  drop on the list to delete  •  Esc cancels  •  RMB orbit"
 	hint.Parent = gui
 end
 
@@ -630,7 +630,9 @@ function VABController:_bestStack(desired, def, radius)
 	local best, center, parent, node = radius, nil, nil, nil
 	for i, part in ipairs(self._vehicle:GetParts()) do
 		local th = part.def.height or 0
-		if th > 0 and not part.def.radial then
+		-- Any part with a body height is a stack target -- including a radial decoupler,
+		-- so you can stack a side booster onto its node.
+		if th > 0 and part.def.stackTarget ~= false then
 			local wp = O + part.cf.Position
 			local top = wp + Vector3.new(0, th * 0.5, 0)
 			local bot = wp - Vector3.new(0, th * 0.5, 0)
@@ -650,36 +652,48 @@ function VABController:_bestStack(desired, def, radius)
 	return nil
 end
 
--- Nearest body side to `desired` (surface/radial attach). Returns
--- (centerWorld, parentIdx, surfaceWorld, dist) or nil.
+-- Nearest body side to `desired` (surface/radial attach). The SIDE (angle + radial
+-- distance) snaps to the body, but the HEIGHT is free -- the part slides up and down the
+-- whole stack following the cursor. The parent is chosen by which body the cursor is
+-- vertically over (so it works on every part, not just the first one on the axis).
+-- Returns (centerWorld, parentIdx, surfaceWorld, dist) or nil.
 function VABController:_bestSurface(desired, def, radius)
 	local O = self:_buildOrigin()
 	local gr = def.radius or 1
-	local best, center, parent, node = radius, nil, nil, nil
+	local bestScore, bestSurf = math.huge, radius
+	local center, parent, node = nil, nil, nil
 	for i, part in ipairs(self._vehicle:GetParts()) do
 		local pdef = part.def
 		local th = pdef.height or 0
 		if th > 0 and pdef.surfaceTarget ~= false and not pdef.radial then
 			local wp = O + part.cf.Position
-			local along = math.clamp(desired.Y - wp.Y, -th * 0.5, th * 0.5)
-			local axisPt = wp + Vector3.new(0, along, 0)
+			local pr = pdef.radius or 3
 			local radial = Vector3.new(desired.X - wp.X, 0, desired.Z - wp.Z)
 			local rdist = radial.Magnitude
-			local surfDist = math.abs(rdist - (pdef.radius or 3))
-			if surfDist < best then
-				local rdir = (rdist > 1e-3) and radial.Unit or Vector3.new(1, 0, 0)
-				if self._snapMode then
-					rdir = self:_snapAngleDir(rdir)
+			local surfDist = math.abs(rdist - pr) -- radial closeness to the body's side
+			-- Engage only on horizontal proximity to the side, so height never blocks the
+			-- snap (you can slide freely up/down, even past the ends of the body).
+			if surfDist < radius then
+				-- Pick the body the cursor is vertically nearest; 0 while alongside it.
+				local outsideY = math.max(0, math.abs(desired.Y - wp.Y) - th * 0.5)
+				local score = surfDist + outsideY
+				if score < bestScore then
+					local rdir = (rdist > 1e-3) and radial.Unit or Vector3.new(1, 0, 0)
+					if self._snapMode then
+						rdir = self:_snapAngleDir(rdir)
+					end
+					bestScore = score
+					bestSurf = surfDist
+					local axisPt = Vector3.new(wp.X, desired.Y, wp.Z) -- free vertical: follow the cursor
+					center = axisPt + rdir * (pr + gr)
+					parent = i
+					node = axisPt + rdir * pr
 				end
-				best = surfDist
-				center = axisPt + rdir * ((pdef.radius or 3) + gr)
-				parent = i
-				node = axisPt + rdir * (pdef.radius or 3)
 			end
 		end
 	end
 	if center then
-		return center, parent, node, best
+		return center, parent, node, bestSurf
 	end
 	return nil
 end

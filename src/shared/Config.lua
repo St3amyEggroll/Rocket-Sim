@@ -133,6 +133,7 @@ Config.CONTROL = {
 	sasKp = 5.0, -- SAS pointing stiffness (toward the selected marker)
 	sasKd = 3.0, -- SAS rate damping
 	aeroDamp = 0.6, -- passive aerodynamic pitch damping per unit air density
+	thrustTorqueScale = 0.12, -- how hard off-centre engine thrust torques the craft
 	maxOmega = 12, -- rad/s angular-velocity safety cap
 }
 Config.FLOATING_ORIGIN = {

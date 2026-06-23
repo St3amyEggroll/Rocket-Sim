@@ -33,6 +33,7 @@ local initOrder = {
 	"MapViewController",
 	"NavballController",
 	"VABController",
+	"StagingController",
 	"HUDController",
 	"MenuController",
 }
@@ -56,6 +57,7 @@ local startOrder = {
 	"MapViewController",
 	"NavballController",
 	"VABController",
+	"StagingController",
 	"HUDController",
 	"MenuController",
 	"FlightController",
@@ -93,4 +95,4 @@ for _, name in ipairs(startOrder) do
 	end
 end
 
-print("[RocketSim] Client systems started -- build P11.1 (VAB pass 1: proximity node snapping, symmetry 1-8, snap/free modes, radial decoupler).")
+print("[RocketSim] Client systems started -- beta 1.0 (KSP-style staging panel, parallel boosters, radial-decoupler subtree drop, off-centre thrust torque, free-slide radial snapping).")

@@ -1,21 +1,26 @@
 --[[
 	VehicleController
-	Owner of: the active craft design AND its flight-time runtime (current stage,
-	remaining fuel). Single source of truth for "what the rocket is".
+	Owner of: the active craft design AND its flight-time runtime (staging, fuel).
+	Single source of truth for "what the rocket is".
 
 	KSP-style 3D assembly: the design is a SET OF PARTS placed in 3D build space, each
-	with an id, its definition, a build-local CFrame, and the index of the part it is
-	attached to (parent; nil for the root). Build space has +Y up (the nose direction)
-	and its origin at the launch-pad point; parts may float freely.
+	with an id, its definition, a build-local CFrame, the index of the part it is
+	attached to (parent; nil for the root), and a STAGE number (which firing it belongs
+	to). Build space has +Y up (the nose direction) and its origin at the launch pad.
 
-	Flight still runs on the proven ALONG-AXIS model: every scalar the simulation needs
-	(mass, centre of mass, centre of pressure, moment of inertia, length, staging) is
-	measured up the +Y body axis from the parts' positions, and GetFlightOffset re-centres
-	the assembly (base on the pad, CoM on the thrust axis) for the renderer. Radial X/Z
-	offsets are carried for the renderer + a later full-radial-flight pass.
+	Staging is a real KSP-style model -- not a fixed serial list:
+	  * Parts are grouped into FUEL SECTIONS: connected runs of tanks/engines, CUT at
+	    every decoupler (decouplers block crossfeed). Engines burn from their own
+	    section, so side boosters carry their own fuel and the core carries its own.
+	  * Each engine and decoupler is assigned a STAGE. Firing a stage IGNITES that
+	    stage's engines (several at once = parallel boosters) and SEPARATES that stage's
+	    decouplers. Whatever is no longer connected to the command pod drops away.
+	  * The ACTIVE set is recomputed from the connectivity each time the stage advances.
 
-	The VAB edits the set (AddPartAt/MovePart/RemovePart/Clear); the flight loop reads
-	thrust/mass and burns fuel. Fires Changed whenever the active parts change.
+	Flight reads net thrust + the thrust torque from off-axis engines, burns each
+	section's fuel, and measures mass / CoM / inertia from the parts still attached.
+	GetFlightOffset re-centres the assembly (base on the pad, CoM on the thrust axis)
+	for the renderer.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -25,14 +30,28 @@ local Config = require(Shared:WaitForChild("Config"))
 local Registry = require(Shared:WaitForChild("Registry"))
 local Signal = require(Shared:WaitForChild("Signal"))
 local Catalog = require(Shared:WaitForChild("PartCatalog"))
-local CraftStats = require(Shared:WaitForChild("CraftStats"))
 
 local VehicleController = {}
+
+local function isDecoupler(def)
+	return def ~= nil and def.decoupler == true
+end
+local function isEngine(def)
+	return def ~= nil and def.category == "engine"
+end
+-- An "actuator" is a part that does something when its stage fires (ignite / separate).
+local function isActuator(def)
+	return isEngine(def) or isDecoupler(def)
+end
 
 function VehicleController:Init()
 	self._surfaceGravity = Config.BODY.mu / (Config.BODY.radius * Config.BODY.radius)
 	self.Changed = Signal.new()
-	self.Staged = Signal.new() -- fires (droppedStageNumber) just before Changed on a stage
+	self.Staged = Signal.new() -- fires (droppedGroups) just before Changed on a stage
+
+	self._editing = true -- VAB shows the whole craft; flight runs the staging sim
+	self._autoStage = true -- auto-assign stages until the player edits the staging panel
+	self._stageFloor = 0 -- lowest number of stages (the panel can add empty ones)
 
 	-- Default rocket: stack the default design vertically (bottom -> top) in build space.
 	self._parts = {}
@@ -49,24 +68,37 @@ function VehicleController:Init()
 	end
 
 	self._stageIndex = 1
-	self._fuelRemaining = 0
 	self:_recompute()
 end
 
--- Bottom of a part along the build axis (used to order the stack for staging).
+function VehicleController:Start()
+	local mode = Registry:Get("GameModeController")
+	self._editing = (mode:GetMode() == "VAB")
+	mode.ModeChanged:Connect(function(m)
+		self._editing = (m == "VAB")
+		self:_computeActive()
+		self.Changed:Fire()
+	end)
+end
+
+-- Bottom of a part along the build axis (used to order the stack + default staging).
 function VehicleController:_partBottom(part)
 	return part.cf.Y - (part.def.height or 0) * 0.5
 end
 
+-- ---------------------------------------------------------------- recompute ----
+
 function VehicleController:_recompute()
-	-- Order the parts bottom -> top by build height; the serial staging model reads them
-	-- in that order (stable: ties keep insertion order).
+	local parts = self._parts
+
+	-- Order the parts bottom -> top (stable: ties keep insertion order). Used for layout
+	-- and for default staging.
 	local order = {}
-	for i = 1, #self._parts do
+	for i = 1, #parts do
 		order[i] = i
 	end
 	table.sort(order, function(a, b)
-		local ba, bb = self:_partBottom(self._parts[a]), self:_partBottom(self._parts[b])
+		local ba, bb = self:_partBottom(parts[a]), self:_partBottom(parts[b])
 		if ba == bb then
 			return a < b
 		end
@@ -74,19 +106,213 @@ function VehicleController:_recompute()
 	end)
 	self._order = order
 
-	local defs = {}
-	for pos, i in ipairs(order) do
-		defs[pos] = self._parts[i].def
-	end
-	self._stats = CraftStats.analyze(defs, self._surfaceGravity)
-
-	-- Map stage (keyed by ordered position) back to each part's index.
-	self._stageOf = {}
-	for pos, i in ipairs(order) do
-		self._stageOf[i] = self._stats.stageOfPart[pos] or 0
-	end
+	self:_computeSections()
+	self._keepRoot = self:_findKeepRoot()
+	self:_assignStages()
+	self._stageCount = self:_maxStage()
+	self._stats = self:_computeStats()
 
 	self:ResetRuntime()
+end
+
+-- Fuel sections: connected components of the part graph (parent links), CUT at every
+-- decoupler (a decoupler conducts no fuel). Each engine burns from its section.
+function VehicleController:_computeSections()
+	local parts = self._parts
+	local uf = {}
+	for i = 1, #parts do
+		uf[i] = i
+	end
+	local function find(x)
+		while uf[x] ~= x do
+			uf[x] = uf[uf[x]]
+			x = uf[x]
+		end
+		return x
+	end
+	for i, p in ipairs(parts) do
+		local pr = p.parent
+		if pr and parts[pr] and not isDecoupler(p.def) and not isDecoupler(parts[pr].def) then
+			local ri, rp = find(i), find(pr)
+			if ri ~= rp then
+				uf[ri] = rp
+			end
+		end
+	end
+	local sectionOf, capacity = {}, {}
+	for i, p in ipairs(parts) do
+		if not isDecoupler(p.def) then
+			local root = find(i)
+			sectionOf[i] = root
+			capacity[root] = (capacity[root] or 0) + (p.def.fuel or 0)
+		end
+	end
+	self._sectionOf = sectionOf
+	self._sectionCapacity = capacity
+end
+
+-- The part that keeps flying: the command pod, else the topmost non-decoupler part.
+function VehicleController:_findKeepRoot()
+	local parts = self._parts
+	for i, p in ipairs(parts) do
+		if p.def.category == "command" then
+			return i
+		end
+	end
+	local best, bi = -math.huge, nil
+	for i, p in ipairs(parts) do
+		if not isDecoupler(p.def) and p.cf.Y > best then
+			best, bi = p.cf.Y, i
+		end
+	end
+	return bi or (parts[1] and 1 or nil)
+end
+
+-- Assign each actuator a stage. While auto (the player hasn't touched staging) the
+-- stages track the build, bottom -> top. Once edited, existing stages are preserved
+-- and only brand-new actuators get a sensible default.
+function VehicleController:_assignStages()
+	local parts = self._parts
+	local acts = {}
+	for i, p in ipairs(parts) do
+		if isActuator(p.def) then
+			acts[#acts + 1] = { i = i, y = self:_partBottom(p) }
+		end
+	end
+	table.sort(acts, function(a, b)
+		if a.y == b.y then
+			return a.i < b.i
+		end
+		return a.y < b.y
+	end)
+
+	if self._autoStage then
+		for rank, a in ipairs(acts) do
+			parts[a.i].stage = rank
+		end
+	else
+		for _, a in ipairs(acts) do
+			if not parts[a.i].stage then
+				local rank = 1
+				for _, b in ipairs(acts) do
+					if b.y < a.y then
+						rank += 1
+					end
+				end
+				parts[a.i].stage = rank
+			end
+		end
+	end
+end
+
+function VehicleController:_maxStage()
+	local m = 0
+	for _, p in ipairs(self._parts) do
+		if isActuator(p.def) and p.stage and p.stage > m then
+			m = p.stage
+		end
+	end
+	return math.max(m, self._stageFloor or 0)
+end
+
+-- Per-stage delta-v / mass / TWR estimate for the VAB readout. Treats each engine
+-- section as a serial burn in ignition order (a good estimate for the readout; the
+-- flight loop itself runs the exact per-frame model).
+function VehicleController:_computeStats()
+	local parts = self._parts
+
+	local totalMass = 0
+	for _, p in ipairs(parts) do
+		totalMass += (p.def.mass or 0) + (p.def.fuel or 0)
+	end
+
+	-- Gather engine sections: fuel, dry mass, a thrust-weighted ve, ignition stage, and
+	-- whether a decoupler can ever drop them (so their dry mass leaves after burning).
+	local sections = {}
+	for i, p in ipairs(parts) do
+		local sec = self._sectionOf[i]
+		if sec then
+			local s = sections[sec]
+			if not s then
+				s = { fuel = 0, dry = 0, thrust = 0, veSum = 0, ignite = math.huge, droppable = false, hasEngine = false }
+				sections[sec] = s
+			end
+			s.dry += p.def.mass or 0
+			s.fuel += p.def.fuel or 0
+			if isEngine(p.def) then
+				s.hasEngine = true
+				s.thrust += p.def.thrust or 0
+				s.veSum += (p.def.thrust or 0) * (p.def.exhaustVelocity or 0)
+				s.ignite = math.min(s.ignite, p.stage or math.huge)
+			end
+			if sec == self._sectionOf[self._keepRoot or -1] then
+				s.keep = true
+			end
+		end
+	end
+	-- A section is droppable if a decoupler touches it and it isn't the keep section.
+	for i, p in ipairs(parts) do
+		if isDecoupler(p.def) then
+			local pr = p.parent
+			if pr and self._sectionOf[pr] and sections[self._sectionOf[pr]] then
+				sections[self._sectionOf[pr]].droppable = true
+			end
+			for j, q in ipairs(parts) do
+				if q.parent == i and self._sectionOf[j] and sections[self._sectionOf[j]] then
+					sections[self._sectionOf[j]].droppable = true
+				end
+			end
+		end
+	end
+
+	-- Burn order: by ignition stage; the keep section always burns last.
+	local burn = {}
+	for _, s in pairs(sections) do
+		if s.hasEngine and s.fuel > 0 then
+			burn[#burn + 1] = s
+		end
+	end
+	table.sort(burn, function(a, b)
+		if a.keep ~= b.keep then
+			return not a.keep
+		end
+		return (a.ignite or 0) < (b.ignite or 0)
+	end)
+
+	local totalDV, stageCount = 0, 0
+	local mCur = totalMass
+	for _, s in ipairs(burn) do
+		local ve = (s.thrust > 0) and (s.veSum / s.thrust) or 0
+		local m0 = mCur
+		local mf = mCur - s.fuel
+		if ve > 0 and mf > 0 then
+			totalDV += ve * math.log(m0 / mf)
+			stageCount += 1
+		end
+		mCur = mf
+		if s.droppable and not s.keep then
+			mCur -= s.dry -- the spent section drops, lightening later stages
+		end
+	end
+
+	-- Launch TWR: thrust of the engines that ignite in stage 1.
+	local launchThrust = 0
+	for _, p in ipairs(parts) do
+		if isEngine(p.def) and (p.stage or math.huge) <= 1 then
+			launchThrust += p.def.thrust or 0
+		end
+	end
+	local launchTWR = 0
+	if launchThrust > 0 and self._surfaceGravity > 0 and totalMass > 0 then
+		launchTWR = launchThrust / (totalMass * self._surfaceGravity)
+	end
+
+	return {
+		stageCount = math.max(stageCount, self._stageCount or 0),
+		totalMass = totalMass,
+		totalDeltaV = totalDV,
+		launchTWR = launchTWR,
+	}
 end
 
 -- ---- Design editing (VAB) ----
@@ -145,21 +371,157 @@ function VehicleController:GetStats()
 	return self._stats
 end
 
+-- ---- Staging design (the staging panel) ----
+
+function VehicleController:GetStageCount()
+	return self._stageCount or 0
+end
+
+function VehicleController:GetCurrentStageIndex()
+	return self._stageIndex or 1
+end
+
+-- For the staging panel: actuators grouped by stage, 1..stageCount.
+function VehicleController:GetStageContents()
+	local out = {}
+	for s = 1, (self._stageCount or 0) do
+		out[s] = {}
+	end
+	for i, p in ipairs(self._parts) do
+		if isActuator(p.def) and p.stage then
+			local s = math.clamp(p.stage, 1, math.max(self._stageCount or 1, 1))
+			out[s] = out[s] or {}
+			out[s][#out[s] + 1] = { index = i, def = p.def, kind = isEngine(p.def) and "engine" or "decoupler" }
+		end
+	end
+	return out
+end
+
+function VehicleController:SetPartStage(index, stage)
+	local p = self._parts[index]
+	if not p or not isActuator(p.def) then
+		return
+	end
+	self._autoStage = false
+	p.stage = math.max(1, math.floor(stage))
+	self._stageFloor = math.max(self._stageFloor or 0, p.stage)
+	self:_recompute()
+end
+
+-- Swap two stages' fire order (▲▼ in the panel).
+function VehicleController:SwapStages(a, b)
+	if a == b then
+		return
+	end
+	self._autoStage = false
+	for _, p in ipairs(self._parts) do
+		if isActuator(p.def) and p.stage then
+			if p.stage == a then
+				p.stage = b
+			elseif p.stage == b then
+				p.stage = a
+			end
+		end
+	end
+	self:_recompute()
+end
+
+function VehicleController:AddStage()
+	self._autoStage = false
+	self._stageFloor = math.max(self._stageFloor or 0, self:_maxStage()) + 1
+	self:_recompute()
+end
+
 -- ---- Runtime (flight) ----
 
 function VehicleController:ResetRuntime()
 	self._stageIndex = 1
-	self._fuelRemaining = (self._stats.stageCount >= 1) and self._stats.stages[1].fuel or 0
+	self._sectionFuel = {}
+	for root, cap in pairs(self._sectionCapacity or {}) do
+		self._sectionFuel[root] = cap
+	end
+	self:_computeActive()
 	self.Changed:Fire()
 end
 
--- True if a part (by index) is still attached (not yet jettisoned).
-function VehicleController:_isActive(i)
-	local st = self._stageOf[i] or 0
-	return st == 0 or st >= self._stageIndex
+-- Recompute which parts are still attached. In the VAB the whole craft is shown; in
+-- flight, a part is active iff it is still connected to the keep-root (command pod)
+-- once every fired decoupler is cut out.
+function VehicleController:_computeActive()
+	local parts = self._parts
+	local active = {}
+	if self._editing then
+		for i = 1, #parts do
+			active[i] = true
+		end
+		self._active = active
+		return
+	end
+
+	local fired = {}
+	for i, p in ipairs(parts) do
+		if isDecoupler(p.def) and p.stage and p.stage <= self._stageIndex then
+			fired[i] = true
+		end
+	end
+
+	local uf = {}
+	for i = 1, #parts do
+		uf[i] = i
+	end
+	local function find(x)
+		while uf[x] ~= x do
+			uf[x] = uf[uf[x]]
+			x = uf[x]
+		end
+		return x
+	end
+	for i, p in ipairs(parts) do
+		local pr = p.parent
+		if pr and parts[pr] and not fired[i] and not fired[pr] then
+			local ri, rp = find(i), find(pr)
+			if ri ~= rp then
+				uf[ri] = rp
+			end
+		end
+	end
+
+	local keep = self._keepRoot
+	for i = 1, #parts do
+		if fired[i] then
+			active[i] = false
+		elseif keep and find(i) == find(keep) then
+			active[i] = true
+		else
+			active[i] = false
+		end
+	end
+	self._active = active
 end
 
--- Active (not-yet-jettisoned) part definitions, bottom -> top.
+function VehicleController:_isActive(i)
+	return self._active and self._active[i] == true
+end
+
+-- Current fuel held by a tank: its share of its section's remaining fuel.
+function VehicleController:_currentFuel(i)
+	local def = self._parts[i].def
+	local cap = def.fuel
+	if not cap or cap <= 0 then
+		return 0
+	end
+	local sec = self._sectionOf[i]
+	if not sec then
+		return 0
+	end
+	local secCap = self._sectionCapacity[sec] or 0
+	if secCap <= 0 then
+		return 0
+	end
+	return cap * ((self._sectionFuel[sec] or 0) / secCap)
+end
+
+-- Active (still-attached) part definitions, bottom -> top.
 function VehicleController:GetActiveParts()
 	local out = {}
 	for _, i in ipairs(self._order) do
@@ -170,98 +532,192 @@ function VehicleController:GetActiveParts()
 	return out
 end
 
--- Active parts with their stage number (0 = payload), design index, and build CFrame,
--- bottom -> top -- so the renderer can place each part in 3D and split off a stage.
+-- Active parts with stage, design index, and build CFrame, bottom -> top.
 function VehicleController:GetActiveLayout()
 	local out = {}
 	for _, i in ipairs(self._order) do
 		if self:_isActive(i) then
 			local part = self._parts[i]
-			out[#out + 1] = { def = part.def, stage = self._stageOf[i] or 0, index = i, cf = part.cf }
+			out[#out + 1] = { def = part.def, stage = part.stage or 0, index = i, cf = part.cf }
+		end
+	end
+	return out
+end
+
+-- Engines that are firing right now: active, ignited (stage already reached), with fuel.
+-- Each carries its build-space lateral position so flight can build the thrust torque.
+function VehicleController:GetActiveEngines()
+	local out = {}
+	if self._editing then
+		return out
+	end
+	for i, p in ipairs(self._parts) do
+		if self:_isActive(i) and isEngine(p.def) and (p.stage or math.huge) <= self._stageIndex then
+			local sec = self._sectionOf[i]
+			local rem = sec and (self._sectionFuel[sec] or 0) or 0
+			if rem > 1e-6 then
+				out[#out + 1] = {
+					x = p.cf.X,
+					z = p.cf.Z,
+					thrust = p.def.thrust or 0,
+					ve = p.def.exhaustVelocity or 1,
+					section = sec,
+					index = i,
+				}
+			end
 		end
 	end
 	return out
 end
 
 function VehicleController:GetCurrentMass(): number
-	local s = self._stats
-	if self._stageIndex > s.stageCount then
-		return s.payloadMass
+	local m = 0
+	for i, p in ipairs(self._parts) do
+		if self:_isActive(i) then
+			m += (p.def.mass or 0) + self:_currentFuel(i)
+		end
 	end
-	local st = s.stages[self._stageIndex]
-	return st.massAbove + st.dryMass + self._fuelRemaining
+	return m
 end
 
-function VehicleController:GetCurrentThrust(throttle): number
-	local s = self._stats
-	if self._stageIndex > s.stageCount or self._fuelRemaining <= 0 then
+-- Net thrust along the nose / current mass (off-axis cancellation handled by the torque).
+function VehicleController:GetThrustAccel(throttle): number
+	local t = 0
+	for _, e in ipairs(self:GetActiveEngines()) do
+		t += e.thrust
+	end
+	if t <= 0 then
 		return 0
 	end
-	return s.stages[self._stageIndex].thrust * throttle
-end
-
-function VehicleController:GetThrustAccel(throttle): number
 	local m = self:GetCurrentMass()
 	if m <= 0 then
 		return 0
 	end
-	return self:GetCurrentThrust(throttle) / m
+	return t * throttle / m
 end
 
 function VehicleController:ConsumeFuel(dt, throttle)
-	local s = self._stats
-	if self._stageIndex > s.stageCount or throttle <= 0 or self._fuelRemaining <= 0 then
+	if throttle <= 0 then
 		return
 	end
-	local st = s.stages[self._stageIndex]
-	local flow = st.thrust / st.ve
-	self._fuelRemaining = math.max(0, self._fuelRemaining - flow * throttle * dt)
+	for _, e in ipairs(self:GetActiveEngines()) do
+		local sec = e.section
+		if sec then
+			local flow = (e.thrust / math.max(e.ve, 1e-3)) * throttle * dt
+			self._sectionFuel[sec] = math.max(0, (self._sectionFuel[sec] or 0) - flow)
+		end
+	end
 end
 
 function VehicleController:CanStage(): boolean
-	return self._stageIndex <= self._stats.stageCount
+	return (self._stageIndex or 1) < (self._stageCount or 0)
 end
 
--- Fire the current stage. Returns the HEIGHT the craft base rises by once the spent
--- parts drop (so the flight loop can shift the upper stage up and keep it in place).
+-- Group dropped part indices into connected clumps (so two boosters that drop together
+-- become two separate spent bodies, not one).
+function VehicleController:_groupDropped(dropped)
+	local inSet = {}
+	for _, i in ipairs(dropped) do
+		inSet[i] = true
+	end
+	local uf = {}
+	for _, i in ipairs(dropped) do
+		uf[i] = i
+	end
+	local function find(x)
+		while uf[x] ~= x do
+			uf[x] = uf[uf[x]]
+			x = uf[x]
+		end
+		return x
+	end
+	for _, i in ipairs(dropped) do
+		local pr = self._parts[i].parent
+		if pr and inSet[pr] then
+			local ri, rp = find(i), find(pr)
+			if ri ~= rp then
+				uf[ri] = rp
+			end
+		end
+	end
+	local groups, map = {}, {}
+	for _, i in ipairs(dropped) do
+		local r = find(i)
+		if not map[r] then
+			map[r] = {}
+			groups[#groups + 1] = map[r]
+		end
+		map[r][#map[r] + 1] = i
+	end
+	return groups
+end
+
+-- Fire the next stage. Returns the HEIGHT the craft base rises by once the spent parts
+-- drop (so the flight loop can shift the upper stage up and keep it in place).
 function VehicleController:Stage(): number
-	local s = self._stats
-	if self._stageIndex > s.stageCount then
+	if not self:CanStage() then
 		return 0
 	end
-	local dropped = self._stageIndex
+	local before = {}
+	for i = 1, #self._parts do
+		before[i] = self:_isActive(i)
+	end
 	local oldBase = self:GetRotProfile().base or 0
 
 	self._stageIndex += 1
-	self._fuelRemaining = (self._stageIndex <= s.stageCount) and s.stages[self._stageIndex].fuel or 0
+	self:_computeActive()
+
+	local dropped = {}
+	for i = 1, #self._parts do
+		if before[i] and not self:_isActive(i) then
+			dropped[#dropped + 1] = i
+		end
+	end
+	local groups = self:_groupDropped(dropped)
 
 	local newBase = self:GetRotProfile().base or oldBase
-	self.Staged:Fire(dropped) -- renderer splits off the spent stage (uses the live model)
-	self.Changed:Fire() -- ...then everything rebuilds for the new active craft
+	self.Staged:Fire(groups)
+	self.Changed:Fire()
 	return math.max(0, newBase - oldBase)
 end
 
+-- Fuel fraction of the sections currently feeding a firing engine (the active gauge).
 function VehicleController:GetFuelFraction(): number
-	local s = self._stats
-	if self._stageIndex > s.stageCount then
-		return 0
+	local rem, cap = 0, 0
+	local seen = {}
+	for _, e in ipairs(self:GetActiveEngines()) do
+		if e.section and not seen[e.section] then
+			seen[e.section] = true
+			rem += self._sectionFuel[e.section] or 0
+			cap += self._sectionCapacity[e.section] or 0
+		end
 	end
-	local full = s.stages[self._stageIndex].fuel
-	return (full > 0) and (self._fuelRemaining / full) or 0
+	return (cap > 0) and (rem / cap) or 0
 end
 
 function VehicleController:GetCurrentStageDV(): number
-	local s = self._stats
-	if self._stageIndex > s.stageCount then
+	local engines = self:GetActiveEngines()
+	if #engines == 0 then
 		return 0
 	end
-	local st = s.stages[self._stageIndex]
+	local rem, cap, thrust, veSum = 0, 0, 0, 0
+	local seen = {}
+	for _, e in ipairs(engines) do
+		thrust += e.thrust
+		veSum += e.thrust * e.ve
+		if e.section and not seen[e.section] then
+			seen[e.section] = true
+			rem += self._sectionFuel[e.section] or 0
+			cap += self._sectionCapacity[e.section] or 0
+		end
+	end
+	local ve = (thrust > 0) and (veSum / thrust) or 0
 	local m = self:GetCurrentMass()
-	local mf = m - self._fuelRemaining
-	if m <= 0 or mf <= 0 then
+	local mf = m - rem
+	if ve <= 0 or m <= 0 or mf <= 0 then
 		return 0
 	end
-	return st.ve * math.log(m / mf)
+	return ve * math.log(m / mf)
 end
 
 -- Along-axis length of the active stack (base -> top), used by camera + touchdown.
@@ -278,35 +734,37 @@ function VehicleController:GetDragArea(): number
 	return a
 end
 
--- Rotational profile of the active stack, measured along the body axis (+Y = nose):
---   com     = centre of mass, as a HEIGHT above the base
---   cop     = centre of pressure (drag-weighted), height above base
---   inertia = pitch/yaw moment of inertia about the CoM
---   margin  = com - cop  (>0 = aerodynamically STABLE; CoP behind CoM)
---   length  = base -> top extent
---   base    = build-space Y of the lowest point (for GetFlightOffset / staging)
---   comX/comZ = build-space lateral CoM (so the renderer can put the thrust axis on it)
--- Masses use the wet part masses (a fixed, representative distribution).
+-- Rotational profile of the active stack, measured along the body axis (+Y = nose),
+-- from the CURRENT masses (dry + remaining section fuel), so the CoM shifts as fuel
+-- burns and stages drop:
+--   com/cop  = centre of mass / pressure, as HEIGHTS above the base
+--   inertia  = pitch/yaw moment of inertia about the CoM
+--   margin   = com - cop  (>0 = aerodynamically STABLE; CoP behind CoM)
+--   length   = base -> top extent
+--   base     = build-space Y of the lowest point (for GetFlightOffset / staging)
+--   comX/comZ = build-space lateral CoM (the thrust axis + the thrust-torque pivot)
 function VehicleController:GetRotProfile()
 	local items = {}
 	local totalM, sumMY, sumMX, sumMZ = 0, 0, 0, 0
 	local sumDrag, sumDragY = 0, 0
 	local minB, maxT = math.huge, -math.huge
-	for _, e in ipairs(self:GetActiveLayout()) do
-		local def = e.def
-		local cy = e.cf.Y
-		local h = def.height or 0
-		local m = (def.mass or 0) + (def.fuel or 0)
-		local drag = def.drag or 0
-		items[#items + 1] = { y = cy, m = m }
-		totalM += m
-		sumMY += m * cy
-		sumMX += m * e.cf.X
-		sumMZ += m * e.cf.Z
-		sumDrag += drag
-		sumDragY += drag * cy
-		minB = math.min(minB, cy - h * 0.5)
-		maxT = math.max(maxT, cy + h * 0.5)
+	for i, p in ipairs(self._parts) do
+		if self:_isActive(i) then
+			local def = p.def
+			local cy = p.cf.Y
+			local h = def.height or 0
+			local m = (def.mass or 0) + self:_currentFuel(i)
+			local drag = def.drag or 0
+			items[#items + 1] = { y = cy, m = m }
+			totalM += m
+			sumMY += m * cy
+			sumMX += m * p.cf.X
+			sumMZ += m * p.cf.Z
+			sumDrag += drag
+			sumDragY += drag * cy
+			minB = math.min(minB, cy - h * 0.5)
+			maxT = math.max(maxT, cy + h * 0.5)
+		end
 	end
 
 	if totalM <= 0 or minB == math.huge then
@@ -359,17 +817,16 @@ function VehicleController:GetBuildCenter(): Vector3
 end
 
 function VehicleController:GetTelemetry(throttle)
+	local engines = self:GetActiveEngines()
 	return {
 		mass = self:GetCurrentMass(),
 		thrustAccel = self:GetThrustAccel(throttle),
 		fuelFrac = self:GetFuelFraction(),
-		stageIndex = math.min(self._stageIndex, self._stats.stageCount),
-		stageCount = self._stats.stageCount,
+		stageIndex = math.min(self._stageIndex, math.max(self._stageCount, 1)),
+		stageCount = self._stageCount,
 		stageDV = self:GetCurrentStageDV(),
-		hasEngine = self._stageIndex <= self._stats.stageCount,
+		hasEngine = #engines > 0,
 	}
 end
-
-function VehicleController:Start() end
 
 return VehicleController

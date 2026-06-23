@@ -65,10 +65,10 @@ function CraftRenderer:Start()
 	self:_buildPad()
 	self:_rebuildCraft()
 
-	-- Staged fires BEFORE Changed, so split off the spent stage from the live model
+	-- Staged fires BEFORE Changed, so split off the spent stage(s) from the live model
 	-- first, then let Changed rebuild the (now smaller) active craft.
-	self._vehicle.Staged:Connect(function(droppedStage)
-		self:_jettison(droppedStage)
+	self._vehicle.Staged:Connect(function(droppedGroups)
+		self:_jettison(droppedGroups)
 	end)
 	self._vehicle.Changed:Connect(function()
 		self:_rebuildCraft()
@@ -78,48 +78,71 @@ function CraftRenderer:Start()
 	end)
 end
 
--- Split off a jettisoned stage as a free-falling spent stage that stays in the world.
-function CraftRenderer:_jettison(stage)
+-- Split off jettisoned parts as free-falling spent stages that stay in the world. Each
+-- GROUP (a connected clump of dropped part indices) becomes its own welded body, so a
+-- pair of side boosters separates into two pieces, not one. Inline stages fall away
+-- down the stack; radial boosters are flung outward from the core.
+function CraftRenderer:_jettison(groups)
 	local model = self._craft
-	if not model then
+	if not model or not groups then
 		return
 	end
 	local craftCF = model:GetPivot()
 
-	local parts = {}
+	-- design index -> the rendered BaseParts that belong to it.
+	local byIdx = {}
 	for _, part in ipairs(model:GetDescendants()) do
-		if part:IsA("BasePart") and part:GetAttribute("stg") == stage then
-			parts[#parts + 1] = part
+		if part:IsA("BasePart") then
+			local idx = part:GetAttribute("idx")
+			if idx then
+				byIdx[idx] = byIdx[idx] or {}
+				table.insert(byIdx[idx], part)
+			end
 		end
 	end
-	if #parts == 0 then
-		return
-	end
 
-	local spent = Instance.new("Model")
-	spent.Name = "SpentStage"
-	local primary = parts[1]
-	for _, part in ipairs(parts) do
-		part.Parent = spent -- reparent keeps world position
-		part.CanCollide = true
-		part.CanQuery = true
-		part.CastShadow = true
-		if part ~= primary then
-			local weld = Instance.new("WeldConstraint")
-			weld.Part0 = primary
-			weld.Part1 = part
-			weld.Parent = primary
+	for _, group in ipairs(groups) do
+		local parts, sum, n = {}, Vector3.zero, 0
+		for _, idx in ipairs(group) do
+			for _, part in ipairs(byIdx[idx] or {}) do
+				parts[#parts + 1] = part
+				sum += part.Position
+				n += 1
+			end
+		end
+		if #parts > 0 then
+			local center = (n > 0) and (sum / n) or craftCF.Position
+			local spent = Instance.new("Model")
+			spent.Name = "SpentStage"
+			local primary = parts[1]
+			for _, part in ipairs(parts) do
+				part.Parent = spent -- reparent keeps world position
+				part.CanCollide = true
+				part.CanQuery = true
+				part.CastShadow = true
+				if part ~= primary then
+					local weld = Instance.new("WeldConstraint")
+					weld.Part0 = primary
+					weld.Part1 = part
+					weld.Parent = primary
+				end
+			end
+			for _, part in ipairs(parts) do
+				part.Anchored = false -- now physics debris (one welded body), gravity takes it
+			end
+			spent.PrimaryPart = primary
+			spent.Parent = Workspace
+
+			-- Outward = away from the craft axis (sideways for boosters); near-zero for an
+			-- inline stage, so those just get a shove straight down the stack.
+			local outward = center - craftCF.Position
+			outward = outward - craftCF.UpVector * outward:Dot(craftCF.UpVector)
+			local odir = (outward.Magnitude > 1e-3) and outward.Unit or -craftCF.UpVector
+			primary.AssemblyLinearVelocity = (self._lastVel or Vector3.zero) + odir * 10 - craftCF.UpVector * 5
+			primary.AssemblyAngularVelocity = odir:Cross(craftCF.UpVector) * 0.6
+			Debris:AddItem(spent, 45)
 		end
 	end
-	for _, part in ipairs(parts) do
-		part.Anchored = false -- now physics debris (one welded body), gravity takes it
-	end
-	spent.PrimaryPart = primary
-	spent.Parent = Workspace
-
-	-- Carry the craft's velocity at separation, plus a gentle shove down the stack.
-	primary.AssemblyLinearVelocity = (self._lastVel or Vector3.zero) - craftCF.UpVector * 6
-	Debris:AddItem(spent, 45)
 end
 
 function CraftRenderer:_cleanupWorld()
