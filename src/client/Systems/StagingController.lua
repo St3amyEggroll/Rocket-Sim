@@ -22,6 +22,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 
 local Registry = require(Shared:WaitForChild("Registry"))
+local PartPreview = require(Shared:WaitForChild("PartPreview"))
 
 local StagingController = {}
 
@@ -248,7 +249,7 @@ function StagingController:_makeRow(stage, chips, current, stageCount)
 	badge.TextColor3 = Color3.fromRGB(18, 20, 26)
 	badge.Text = tostring(stage)
 	badge.Parent = row
-	corner(badge, 5)
+	corner(badge, 13)
 
 	-- Reorder controls (VAB only), pinned right.
 	local rightPad = 6
@@ -334,46 +335,51 @@ function StagingController:_makeRow(stage, chips, current, stageCount)
 	self._rows[#self._rows + 1] = { frame = row, stage = stage }
 end
 
--- Little glyph icons per part kind (instead of E/D/R letters).
-local ICON = {
-	engine = "🔥",
-	chute = "🪂",
-	decoupler = "✂️",
-	radialdecoupler = "✂️",
-}
-
-function StagingController:_chipIcon(chip)
-	return ICON[chip.kind] or "•"
-end
-
+-- A staging chip: a small 3D part icon (shared with the parts palette), with a symmetry
+-- count badge for grouped copies. Dimmed once the stage has fired.
 function StagingController:_makeChip(holder, chip, fired)
 	local b = Instance.new("TextButton")
-	b.Size = UDim2.fromOffset(32, 28)
-	b.BackgroundColor3 = fired and DIM or (chip.def.color or ENGINE_C)
+	b.Size = UDim2.fromOffset(34, 30)
+	b.BackgroundColor3 = Color3.fromRGB(16, 18, 24)
 	b.BorderSizePixel = 0
-	b.Font = Enum.Font.GothamBold
-	b.TextSize = 16
-	b.TextColor3 = Color3.fromRGB(20, 22, 28)
-	b.Text = self:_chipIcon(chip)
+	b.Text = ""
 	b.AutoButtonColor = self._editable
 	b.Parent = holder
-	corner(b, 5)
+	corner(b, 6)
+
+	local vf = PartPreview.thumbnail(chip.def)
+	vf.Size = UDim2.new(1, -2, 1, -2)
+	vf.Position = UDim2.fromOffset(1, 1)
+	vf.Active = false -- let the button receive the click
+	vf.Parent = b
+	corner(vf, 5)
+
+	if fired then
+		local shade = Instance.new("Frame")
+		shade.Size = UDim2.fromScale(1, 1)
+		shade.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+		shade.BackgroundTransparency = 0.55
+		shade.BorderSizePixel = 0
+		shade.ZIndex = 2
+		shade.Parent = b
+		corner(shade, 6)
+	end
 
 	-- Symmetry count badge (e.g. "2") when this chip stands for several copies.
 	if chip.count and chip.count > 1 then
 		local badge = Instance.new("TextLabel")
 		badge.AnchorPoint = Vector2.new(1, 0)
-		badge.Position = UDim2.new(1, 2, 0, -3)
-		badge.Size = UDim2.fromOffset(15, 15)
+		badge.Position = UDim2.new(1, 3, 0, -4)
+		badge.Size = UDim2.fromOffset(16, 16)
 		badge.BackgroundColor3 = LIVE
 		badge.BorderSizePixel = 0
 		badge.Font = Enum.Font.GothamBold
 		badge.TextSize = 11
 		badge.TextColor3 = Color3.fromRGB(16, 20, 16)
 		badge.Text = tostring(chip.count)
-		badge.ZIndex = 3
+		badge.ZIndex = 4
 		badge.Parent = b
-		corner(badge, 7)
+		corner(badge, 8)
 	end
 
 	if self._editable then
@@ -387,18 +393,21 @@ end
 
 function StagingController:_beginDrag(chip)
 	self:_cancelDrag()
-	local ghost = Instance.new("TextLabel")
-	ghost.Size = UDim2.fromOffset(36, 30)
-	ghost.BackgroundColor3 = chip.def.color or ENGINE_C
-	ghost.BackgroundTransparency = 0.1
+	local ghost = Instance.new("Frame")
+	ghost.Size = UDim2.fromOffset(40, 36)
+	ghost.BackgroundColor3 = Color3.fromRGB(16, 18, 24)
+	ghost.BackgroundTransparency = 0.05
 	ghost.BorderSizePixel = 0
-	ghost.Font = Enum.Font.GothamBold
-	ghost.TextSize = 17
-	ghost.TextColor3 = Color3.fromRGB(20, 22, 28)
-	ghost.Text = self:_chipIcon(chip)
 	ghost.ZIndex = 50
 	ghost.Parent = self._gui
-	corner(ghost, 6)
+	corner(ghost, 7)
+	local vf = PartPreview.thumbnail(chip.def)
+	vf.Size = UDim2.new(1, -2, 1, -2)
+	vf.Position = UDim2.fromOffset(1, 1)
+	vf.ZIndex = 51
+	vf.Active = false
+	vf.Parent = ghost
+	corner(vf, 6)
 	self._chipDrag = { indices = chip.indices, ghost = ghost }
 	self:_moveGhost()
 end
