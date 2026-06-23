@@ -18,7 +18,6 @@ local Registry = require(Shared:WaitForChild("Registry"))
 local systemsFolder = script:WaitForChild("Systems")
 
 local initOrder = {
-	"DebugController",
 	"TerrainController",
 	"GameModeController",
 	"VehicleController",
@@ -39,11 +38,9 @@ local initOrder = {
 }
 
 -- Listeners must Start before the flight loop begins firing events.
--- DebugController starts first so its overlay is up even if something else fails.
 -- CameraController starts before CraftRenderer so the planet proxy uses the
 -- current frame's camera position.
 local startOrder = {
-	"DebugController",
 	"TerrainController",
 	"GameModeController",
 	"VehicleController",
@@ -95,4 +92,4 @@ for _, name in ipairs(startOrder) do
 	end
 end
 
-print("[RocketSim] Client systems started -- beta 1.0 (KSP-style staging panel, parallel boosters, radial-decoupler subtree drop, off-centre thrust torque, free-slide radial snapping).")
+print("[RocketSim] Client systems started -- 1.0.1 (per-section fuel gauges, over-the-side radial snapping, side-mount radial decouplers).")

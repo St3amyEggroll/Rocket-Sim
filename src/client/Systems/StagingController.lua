@@ -17,6 +17,7 @@
 
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 
@@ -51,6 +52,7 @@ end
 
 function StagingController:Init()
 	self._rows = {}
+	self._fuelBars = {}
 	self._editable = true
 	self._chipDrag = nil
 end
@@ -81,7 +83,23 @@ function StagingController:Start()
 		end
 	end)
 
+	-- Live fuel gauges: keep the bar fills in sync with each section's remaining fuel.
+	RunService.RenderStepped:Connect(function()
+		self:_updateFuel()
+	end)
+
 	self:_render()
+end
+
+function StagingController:_updateFuel()
+	if not self._gui or not self._gui.Enabled then
+		return
+	end
+	for _, b in ipairs(self._fuelBars) do
+		local frac = self._vehicle:GetSectionFuelFrac(b.sec)
+		b.fill.Size = UDim2.new(1, 0, frac, 0)
+		b.fill.BackgroundColor3 = (frac > 0.22) and LIVE or Color3.fromRGB(228, 116, 58)
+	end
 end
 
 function StagingController:_build(parentGui)
@@ -188,6 +206,7 @@ function StagingController:_render()
 		row.frame:Destroy()
 	end
 	self._rows = {}
+	self._fuelBars = {} -- bar fills are children of the rows, destroyed with them
 
 	local contents = self._vehicle:GetStageContents()
 	local stageCount = self._vehicle:GetStageCount()
@@ -261,10 +280,34 @@ function StagingController:_makeRow(stage, chips, current, stageCount)
 		rightPad = 56
 	end
 
+	-- Fuel gauges: one thin vertical bar per fuel section feeding this stage's engines
+	-- (each booster drains its own), pinned just right of the stage badge.
+	local barX = 36
+	for _, sec in ipairs(self._vehicle:GetStageSections(stage)) do
+		local bg = Instance.new("Frame")
+		bg.Size = UDim2.fromOffset(5, 30)
+		bg.Position = UDim2.fromOffset(barX, 5)
+		bg.BackgroundColor3 = Color3.fromRGB(16, 18, 24)
+		bg.BorderSizePixel = 0
+		bg.Parent = row
+		corner(bg, 2)
+		local fill = Instance.new("Frame")
+		fill.AnchorPoint = Vector2.new(0.5, 1)
+		fill.Position = UDim2.new(0.5, 0, 1, 0)
+		fill.Size = UDim2.new(1, 0, self._vehicle:GetSectionFuelFrac(sec), 0)
+		fill.BackgroundColor3 = LIVE
+		fill.BorderSizePixel = 0
+		fill.Parent = bg
+		corner(fill, 2)
+		self._fuelBars[#self._fuelBars + 1] = { fill = fill, sec = sec }
+		barX += 7
+	end
+
+	local holderX = barX + 2
 	local holder = Instance.new("Frame")
 	holder.BackgroundTransparency = 1
-	holder.Position = UDim2.fromOffset(38, 0)
-	holder.Size = UDim2.new(1, -(38 + rightPad), 1, 0)
+	holder.Position = UDim2.fromOffset(holderX, 0)
+	holder.Size = UDim2.new(1, -(holderX + rightPad), 1, 0)
 	holder.Parent = row
 	local hl = Instance.new("UIListLayout")
 	hl.FillDirection = Enum.FillDirection.Horizontal

@@ -381,6 +381,31 @@ function VehicleController:GetCurrentStageIndex()
 	return self._stageIndex or 1
 end
 
+-- Distinct fuel sections (with tankage) feeding a stage's engines -- so the staging
+-- panel can draw one fuel gauge per booster/section in that stage.
+function VehicleController:GetStageSections(stage)
+	local secs, seen = {}, {}
+	for i, p in ipairs(self._parts) do
+		if isEngine(p.def) and p.stage == stage then
+			local sec = self._sectionOf[i]
+			if sec and not seen[sec] and (self._sectionCapacity[sec] or 0) > 0 then
+				seen[sec] = true
+				secs[#secs + 1] = sec
+			end
+		end
+	end
+	return secs
+end
+
+-- Remaining fuel fraction (0..1) of a fuel section, for its gauge.
+function VehicleController:GetSectionFuelFrac(sec)
+	local cap = self._sectionCapacity[sec] or 0
+	if cap <= 0 then
+		return 0
+	end
+	return math.clamp((self._sectionFuel[sec] or 0) / cap, 0, 1)
+end
+
 -- For the staging panel: actuators grouped by stage, 1..stageCount.
 function VehicleController:GetStageContents()
 	local out = {}
@@ -671,6 +696,11 @@ function VehicleController:Stage(): number
 	for i = 1, #self._parts do
 		if before[i] and not self:_isActive(i) then
 			dropped[#dropped + 1] = i
+			-- The fuel left in a dropped section leaves with the booster: empty its gauge.
+			local sec = self._sectionOf[i]
+			if sec then
+				self._sectionFuel[sec] = 0
+			end
 		end
 	end
 	local groups = self:_groupDropped(dropped)

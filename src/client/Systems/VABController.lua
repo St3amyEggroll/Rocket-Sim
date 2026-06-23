@@ -424,7 +424,7 @@ function VABController:_buildControls(gui)
 	hint.Font = Enum.Font.Code
 	hint.TextSize = 13
 	hint.TextColor3 = DIM
-	hint.Text = "Hold + drag a part -- top/bottom STACK-snaps, a side SURFACE-snaps (slides up/down freely)  •  stack onto a radial decoupler to build a side booster  •  set the firing order in STAGING (right)  •  C snap  •  X symmetry  •  Alt force-snap  •  drop on the list to delete  •  Esc cancels  •  RMB orbit"
+	hint.Text = "Hold + drag a part -- top/bottom STACK-snaps; over a body's side it SURFACE-snaps (slide up/down), else it rides the cursor  •  mount onto a radial decoupler's side to build a booster  •  set the firing order in STAGING (right)  •  C snap  •  X symmetry  •  Alt force-snap  •  drop on the list to delete  •  Esc cancels  •  RMB orbit"
 	hint.Parent = gui
 end
 
@@ -630,9 +630,9 @@ function VABController:_bestStack(desired, def, radius)
 	local best, center, parent, node = radius, nil, nil, nil
 	for i, part in ipairs(self._vehicle:GetParts()) do
 		local th = part.def.height or 0
-		-- Any part with a body height is a stack target -- including a radial decoupler,
-		-- so you can stack a side booster onto its node.
-		if th > 0 and part.def.stackTarget ~= false then
+		-- A body's top/bottom nodes are stack targets. Radial parts (fins, radial
+		-- decouplers) are NOT stack targets -- things mount on their SIDE, not their ends.
+		if th > 0 and not part.def.radial then
 			local wp = O + part.cf.Position
 			local top = wp + Vector3.new(0, th * 0.5, 0)
 			local bot = wp - Vector3.new(0, th * 0.5, 0)
@@ -653,30 +653,31 @@ function VABController:_bestStack(desired, def, radius)
 end
 
 -- Nearest body side to `desired` (surface/radial attach). The SIDE (angle + radial
--- distance) snaps to the body, but the HEIGHT is free -- the part slides up and down the
--- whole stack following the cursor. The parent is chosen by which body the cursor is
--- vertically over (so it works on every part, not just the first one on the axis).
--- Returns (centerWorld, parentIdx, surfaceWorld, dist) or nil.
+-- distance) snaps to the body, and you slide freely up/down it -- but ONLY while the
+-- cursor is actually over that body's side. Off every part nothing snaps, so the held
+-- part just rides the cursor. Targets include radial decouplers (mount a booster on the
+-- decoupler's side). Returns (centerWorld, parentIdx, surfaceWorld, dist) or nil.
 function VABController:_bestSurface(desired, def, radius)
 	local O = self:_buildOrigin()
 	local gr = def.radius or 1
+	local SIDE_MARGIN = 1.5 -- a little reach past a body's ends still counts as "over it"
 	local bestScore, bestSurf = math.huge, radius
 	local center, parent, node = nil, nil, nil
 	for i, part in ipairs(self._vehicle:GetParts()) do
 		local pdef = part.def
 		local th = pdef.height or 0
-		if th > 0 and pdef.surfaceTarget ~= false and not pdef.radial then
+		-- Anything with a body height can take a side mount: tanks, pods, AND radial
+		-- decouplers. Fins (height 0) are excluded.
+		if th > 0 and pdef.surfaceTarget ~= false then
 			local wp = O + part.cf.Position
 			local pr = pdef.radius or 3
 			local radial = Vector3.new(desired.X - wp.X, 0, desired.Z - wp.Z)
 			local rdist = radial.Magnitude
-			local surfDist = math.abs(rdist - pr) -- radial closeness to the body's side
-			-- Engage only on horizontal proximity to the side, so height never blocks the
-			-- snap (you can slide freely up/down, even past the ends of the body).
-			if surfDist < radius then
-				-- Pick the body the cursor is vertically nearest; 0 while alongside it.
-				local outsideY = math.max(0, math.abs(desired.Y - wp.Y) - th * 0.5)
-				local score = surfDist + outsideY
+			local surfDist = math.abs(rdist - pr) -- radial closeness to the side
+			local outsideY = math.abs(desired.Y - wp.Y) - th * 0.5 -- >0 = past an end
+			-- Snap only while over this body's side: close radially AND within its height.
+			if surfDist < radius and outsideY <= SIDE_MARGIN then
+				local score = surfDist + math.max(0, outsideY)
 				if score < bestScore then
 					local rdir = (rdist > 1e-3) and radial.Unit or Vector3.new(1, 0, 0)
 					if self._snapMode then
@@ -684,7 +685,10 @@ function VABController:_bestSurface(desired, def, radius)
 					end
 					bestScore = score
 					bestSurf = surfDist
-					local axisPt = Vector3.new(wp.X, desired.Y, wp.Z) -- free vertical: follow the cursor
+					-- Slide freely along the body, clamped to its height (the attach point
+					-- stays on the part, not floating in the reach margin).
+					local clampedY = math.clamp(desired.Y, wp.Y - th * 0.5, wp.Y + th * 0.5)
+					local axisPt = Vector3.new(wp.X, clampedY, wp.Z)
 					center = axisPt + rdir * (pr + gr)
 					parent = i
 					node = axisPt + rdir * pr
