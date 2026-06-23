@@ -50,6 +50,7 @@ end
 
 function PlanetRenderer:Init()
 	self._trueRadius = Planet.lodRadius()
+	self._surfaceRadius = Config.BODY.radius
 	self._atmoRadius = Config.BODY.radius + Config.ATMOSPHERE.top
 	-- Within maxRender the body is drawn at TRUE scale/position (mesh spheres have no
 	-- size cap), so the surface and low orbit are seamless and never occlude the craft.
@@ -87,9 +88,11 @@ function PlanetRenderer:Start()
 	-- Translucent atmosphere shell (purely cosmetic), drawn concentric with the body.
 	self._atmo, self._atmoMesh = self:_makeSphere("Atmosphere", Config.ATMOSPHERE.color, Enum.Material.ForceField, 0.5)
 
-	-- Biome shell: a layer of land-colored tiles over the base (ocean) sphere, so you see
-	-- continents from orbit.
-	self:_buildBiomeShell()
+	-- Biome detail over the base (ocean) sphere, so you see continents from orbit. Prefer a
+	-- painted equirectangular texture; fall back to a tile shell if that isn't supported.
+	if not self:_tryTexture() then
+		self:_buildBiomeShell()
+	end
 
 	-- Update after the camera has been positioned for this frame.
 	RunService:BindToRenderStep("RocketSim_Planet", Enum.RenderPriority.Camera.Value + 2, function()
@@ -144,10 +147,52 @@ function PlanetRenderer:_buildBiomeShell()
 end
 
 function PlanetRenderer:_setShell(visible)
+	if not self._shell then
+		return
+	end
 	if visible ~= self._shellVisible then
 		self._shellVisible = visible
 		self._shell.Parent = visible and Workspace or nil
 	end
+end
+
+-- Try to paint an equirectangular biome image (sampled from Planet) onto the LOD sphere
+-- via EditableImage. The sphere is at the LOD radius (below the surface), so it never
+-- pokes through terrain. Returns true if it applied; on any failure returns false so we
+-- fall back to the tile shell. (Roblox's sphere-mesh texturing is finicky and this can't
+-- be verified here, so it's behind Config.LOD.smoothTexture and fully pcall-guarded.)
+function PlanetRenderer:_tryTexture()
+	if not Config.LOD.smoothTexture then
+		return false
+	end
+	local AssetService = game:GetService("AssetService")
+	local ok = pcall(function()
+		local W = math.clamp(Config.LOD.textureSize or 256, 16, 1024)
+		local H = math.max(8, math.floor(W / 2))
+		local img = AssetService:CreateEditableImage({ Size = Vector2.new(W, H) })
+		if not img then
+			error("EditableImage unavailable")
+		end
+		local buf = buffer.create(W * H * 4)
+		local i = 0
+		for y = 0, H - 1 do
+			local lat = (0.5 - (y + 0.5) / H) * math.pi -- +pi/2 (top) .. -pi/2 (bottom)
+			local cl, sl = math.cos(lat), math.sin(lat)
+			for x = 0, W - 1 do
+				local lon = ((x + 0.5) / W * 2 - 1) * math.pi
+				local c = Planet.lodColorForUnit(cl * math.cos(lon), sl, cl * math.sin(lon))
+				buffer.writeu8(buf, i, math.floor(c.R * 255 + 0.5))
+				buffer.writeu8(buf, i + 1, math.floor(c.G * 255 + 0.5))
+				buffer.writeu8(buf, i + 2, math.floor(c.B * 255 + 0.5))
+				buffer.writeu8(buf, i + 3, 255)
+				i += 4
+			end
+		end
+		img:WritePixelsBuffer(Vector2.zero, Vector2.new(W, H), buf)
+		self._ballMesh.TextureId = Content.fromObject(img)
+	end)
+	self._textured = ok
+	return ok
 end
 
 function PlanetRenderer:_update()
@@ -174,9 +219,10 @@ function PlanetRenderer:_update()
 	local toPlanet = center - camPos
 	local dist = toPlanet.Magnitude
 
-	-- Show the biome tiles only within render range (in orbit, where you'd see them); far
-	-- out the planet is just a dot, so fall back to the plain ocean sphere.
-	self:_setShell(dist <= self._maxRender)
+	-- Show the biome tiles only from SPACE -- high enough that terrain has unloaded (so they
+	-- never poke through the ground) and still within render range (far out it's just a dot).
+	local fromSpace = dist > (self._surfaceRadius + Config.TERRAIN.streamOutAlt)
+	self:_setShell(not self._textured and fromSpace and dist <= self._maxRender)
 
 	local renderCenter, scale
 	if dist <= self._maxRender or dist < 1e-3 then

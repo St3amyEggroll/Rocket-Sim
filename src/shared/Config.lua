@@ -126,14 +126,18 @@ Config.MAP = {
 	frameSize = 8000,
 }
 
--- From-space LOD: the distant planet is a base ocean sphere with a shell of biome-colored
--- land tiles laid over it (sampled from Planet), so you see continents / deserts / ice
--- from orbit. The tiles only show within the planet's render range (in orbit, where they
--- matter); far out it falls back to the plain ocean dot. Higher bands = finer continents
--- but more parts.
+-- From-space LOD: the distant planet is a base ocean sphere with biome detail laid over
+-- it (sampled from Planet), so you see continents / deserts / ice from orbit. The biome
+-- layer only shows from space (terrain covers it up close, so it never pokes through).
+--   smoothTexture = true  -> paint an equirectangular biome image onto the sphere
+--                            (cleanest, but needs EditableImage support; falls back to
+--                            tiles if the client/engine can't apply it).
+--   smoothTexture = false -> a shell of biome-colored tiles (rock-solid, slightly faceted).
 Config.LOD = {
-	latBands = 18, -- latitude rings of tiles (pole to pole)
-	lonBands = 48, -- longitude tiles at the equator (fewer toward the poles)
+	smoothTexture = true, -- set false to use the tile shell instead (if the texture looks wrong/blank)
+	textureSize = 256, -- equirectangular image width (height = half); <= 1024
+	latBands = 18, -- tile shell: latitude rings (pole to pole)
+	lonBands = 48, -- tile shell: longitude tiles at the equator (fewer toward the poles)
 }
 
 Config.CRAFT = {
