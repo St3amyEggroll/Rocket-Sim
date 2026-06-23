@@ -69,12 +69,18 @@ function FlightController:Init()
 
 	self._turnStart = Config.LAUNCH.turnStartAlt
 	self._turnEnd = Config.LAUNCH.turnEndAlt
-	-- Launch site at the +Y pole, sitting on the terrain height there.
-	self._launchRadius = Planet.radiusForSim(Orbit.vec(0, body.radius, 0))
+	-- Launch site on the equator (unit direction), sitting on the terrain height there.
+	local site = Config.LAUNCH.site
+	self._launchDir = site.Unit
+	local ld = self._launchDir
+	self._launchRadius = Planet.radiusForSim(Orbit.vec(ld.X * body.radius, ld.Y * body.radius, ld.Z * body.radius))
 
-	-- Nose points radial-out (+Y).
-	self._state = { position = Orbit.vec(0, self._launchRadius, 0), velocity = Orbit.vec(0, 0, 0) }
-	self._attitude = CFrame.lookAt(Vector3.zero, Vector3.yAxis, Vector3.xAxis)
+	-- Nose points radial-out (along the launch direction).
+	self._state = {
+		position = Orbit.vec(ld.X * self._launchRadius, ld.Y * self._launchRadius, ld.Z * self._launchRadius),
+		velocity = Orbit.vec(0, 0, 0),
+	}
+	self._attitude = self:_launchAttitude()
 	self._omega = Vector3.zero -- angular velocity (world frame, rad/s)
 	self._status = "VAB"
 	self._powered = false
@@ -118,16 +124,28 @@ function FlightController:Start()
 	end)
 end
 
+-- Attitude on the pad: nose points radial-out along the launch direction.
+function FlightController:_launchAttitude()
+	local ld = self._launchDir
+	local nose = Vector3.new(ld.X, ld.Y, ld.Z)
+	local ref = (math.abs(nose.Y) < 0.99) and Vector3.yAxis or Vector3.xAxis
+	return CFrame.lookAt(Vector3.zero, nose, ref)
+end
+
 function FlightController:_onMode(mode)
 	self._vehicle:ResetRuntime()
-	-- Back on the pad: reset to Terra (the active body), at the +Y pole.
+	-- Back on the pad: reset to Terra (the active body), at the equatorial launch site.
 	self._bodyId = "planet"
 	self._mu = self._planetMu
 	self._bodyRadius = self._planetRadius
 	self._bodyName = Config.BODY.name
 	self._missionTime = 0
-	self._state = { position = Orbit.vec(0, self._launchRadius, 0), velocity = Orbit.vec(0, 0, 0) }
-	self._attitude = CFrame.lookAt(Vector3.zero, Vector3.yAxis, Vector3.xAxis)
+	local ld = self._launchDir
+	self._state = {
+		position = Orbit.vec(ld.X * self._launchRadius, ld.Y * self._launchRadius, ld.Z * self._launchRadius),
+		velocity = Orbit.vec(0, 0, 0),
+	}
+	self._attitude = self:_launchAttitude()
 	self._omega = Vector3.zero
 	self._landed = true
 	self._crashed = false
@@ -136,13 +154,13 @@ function FlightController:_onMode(mode)
 end
 
 -- The moon's Terra-centric state (position, velocity) at mission time t. It orbits in
--- the Y/Z plane so a polar ascent is coplanar with it.
+-- the X/Z equatorial plane, coplanar with the equatorial launch.
 function FlightController:_moonStateAt(t)
 	local m = self._moon
 	local a = m.phase + m.w * t
 	local ca, sa = math.cos(a), math.sin(a)
 	local r = m.orbitRadius
-	return Orbit.vec(0, r * ca, r * sa), Orbit.vec(0, -r * m.w * sa, r * m.w * ca)
+	return Orbit.vec(r * ca, 0, r * sa), Orbit.vec(-r * m.w * sa, 0, r * m.w * ca)
 end
 
 -- Terra-centric centre / velocity of the active body (zero for Terra itself).
@@ -537,9 +555,14 @@ end
 function FlightController:GetMoonRadius()
 	return self._moon.radius
 end
--- Sim position of the launch pad base (the VAB build origin / nose points +Y here).
+-- Sim position of the launch pad base (the VAB build origin; nose points radial-out here).
 function FlightController:GetLaunchPosition()
-	return Orbit.vec(0, self._launchRadius, 0)
+	local ld = self._launchDir
+	return Orbit.vec(ld.X * self._launchRadius, ld.Y * self._launchRadius, ld.Z * self._launchRadius)
+end
+-- The launch radial-out direction (build-space +Y maps to this in the world).
+function FlightController:GetLaunchUp()
+	return self._launchDir
 end
 function FlightController:GetUpdatedSignal()
 	return self.Updated

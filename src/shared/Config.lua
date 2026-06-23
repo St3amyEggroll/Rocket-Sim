@@ -23,8 +23,8 @@ Config.BODY = {
 -- A second body: a Mun-style moon orbiting Terra with its own sphere of influence
 -- (SOI) and gravity. Patched conics: outside the SOI you orbit Terra; cross into the
 -- SOI and the flight switches to a two-body orbit around the moon. It orbits in the
--- launch plane (Y/Z) so a polar ascent is coplanar with it -- you can actually fly
--- there with a well-timed prograde burn. Airless: land it propulsively (no chutes).
+-- EQUATORIAL (X/Z) plane, coplanar with an equatorial launch -- fly there with a
+-- well-timed prograde burn. Airless: land it propulsively (no chutes).
 Config.MOON = {
 	name = "Mun",
 	radius = 2600,
@@ -44,7 +44,7 @@ Config.MOON = {
 -- the mesh-sphere body is the low-detail LOD.
 Config.TERRAIN = {
 	chunkSize = 220, -- world-space cube edge of one terrain chunk
-	renderDistance = 640, -- terrain is shown within this many studs of the craft
+	renderDistance = 960, -- terrain is shown within this many studs of the craft
 	spacing = 18, -- grid step between terrain columns inside a chunk
 	footprint = 26, -- column footprint (overlaps neighbours so there are no gaps)
 	crustThickness = 26, -- how deep each column fills below its surface
@@ -133,6 +133,10 @@ Config.CRAFT = {
 
 Config.LAUNCH = {
 	defaultDesign = { "EngineMain", "Fin", "TankL", "TankL", "Pod" }, -- bottom -> top
+	-- Launch site direction (unit) from the body centre. On the EQUATOR (X/Z plane) so a
+	-- gravity-turn ascent is coplanar with the equatorial Mun -- you can transfer there
+	-- with a normal prograde burn, KSP-style.
+	site = Vector3.new(1, 0, 0),
 	turnStartAlt = 150,
 	turnEndAlt = 1200,
 }

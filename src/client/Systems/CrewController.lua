@@ -149,9 +149,12 @@ function CrewController:_ride(state, info)
 	end
 	look = look.Unit
 
-	-- Sit near the top of the rocket (by the command pod).
+	-- Sit near the top of the rocket (by the command pod). The sim state is relative to the
+	-- active body (patched conics); add the body centre to render at the true position.
+	local bc = (info and info.bodyCenter) or { x = 0, y = 0, z = 0 }
 	local height = self._vehicle and self._vehicle:GetHeight() or self._riderHeight
-	local standPos = self._origin:ToRender(state.position) + up * (height * 0.82 + 2)
+	local absPos = { x = state.position.x + bc.x, y = state.position.y + bc.y, z = state.position.z + bc.z }
+	local standPos = self._origin:ToRender(absPos) + up * (height * 0.82 + 2)
 	model:PivotTo(CFrame.lookAt(standPos, standPos + look, up))
 end
 

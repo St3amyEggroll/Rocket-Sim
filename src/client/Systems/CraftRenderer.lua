@@ -60,6 +60,8 @@ function CraftRenderer:Start()
 	self._origin = Registry:Get("FloatingOriginController")
 	self._vehicle = Registry:Get("VehicleController")
 	local Flight = Registry:Get("FlightController")
+	self._flight = Flight
+	self._launchUp = Flight:GetLaunchUp() -- radial-out at the launch site (build +Y -> this)
 
 	self:_cleanupWorld()
 	self:_buildPad()
@@ -163,14 +165,15 @@ function CraftRenderer:_cleanupWorld()
 end
 
 function CraftRenderer:_buildPad()
-	-- Fixed at the +Y launch pole, top flush with the terrain there (origin is
-	-- fixed, so this never moves). CanCollide so the pad reads as solid ground.
-	local surf = Planet.radiusForUnit(0, 1, 0)
+	-- Fixed at the equatorial launch site, oriented radial-out, top flush with the terrain
+	-- there (origin is fixed, so this never moves). CanCollide so it reads as solid ground.
+	local up = self._launchUp
+	local surf = Planet.radiusForUnit(up.X, up.Y, up.Z)
 	makePart(Workspace, "LaunchPad", {
 		Size = Vector3.new(120, 8, 120),
 		Color = Color3.fromRGB(90, 92, 100),
 		Material = Enum.Material.Metal,
-		CFrame = CFrame.new(0, surf - 4, 0),
+		CFrame = pointCFrame(up * (surf - 4), up),
 	})
 end
 
@@ -368,9 +371,9 @@ function CraftRenderer:_render(state, info)
 	local pd = info and info.pointDir or Orbit.vec(0, 1, 0)
 	local up = Vector3.new(pd.x or pd.X, pd.y or pd.Y, pd.z or pd.Z)
 	if info and info.mode == "VAB" then
-		-- VAB: parts at their raw build positions on the pad (+Y up), so a free-floating
-		-- anchor stays exactly where it was dropped while building.
-		self._craft:PivotTo(CFrame.new(craftRender))
+		-- VAB: parts at their raw build positions, with build +Y pointing radial-out so the
+		-- craft stands upright on the (radial) launch pad.
+		self._craft:PivotTo(pointCFrame(craftRender, self._launchUp))
 	else
 		-- Flight: map the assembly's base (CoM on the thrust axis) onto the craft position.
 		local off = self._vehicle:GetFlightOffset()

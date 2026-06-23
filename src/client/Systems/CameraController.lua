@@ -22,6 +22,16 @@ local Registry = require(Shared:WaitForChild("Registry"))
 
 local CameraController = {}
 
+local function frameFromUp(pos, up)
+	up = (up.Magnitude > 1e-3) and up.Unit or Vector3.yAxis
+	local ref = (math.abs(up.Y) < 0.99) and Vector3.yAxis or Vector3.xAxis
+	local fwd = up:Cross(ref)
+	if fwd.Magnitude < 1e-3 then
+		fwd = up:Cross(Vector3.xAxis)
+	end
+	return CFrame.lookAt(pos, pos + fwd.Unit, up)
+end
+
 function CameraController:Init() end
 
 function CameraController:Start()
@@ -62,20 +72,25 @@ function CameraController:_update(state, info)
 
 	local orbit = self._input:GetCameraOrbit()
 
-	-- VAB: orbit the rocket on the pad so you can build it in 3D.
+	-- VAB: orbit the rocket on the pad so you can build it in 3D. Everything is framed in
+	-- the launch frame (build +Y -> radial-out) so the craft reads as upright on screen.
 	if info and info.mode == "VAB" then
 		local base = self._origin:ToRender(self._flight:GetLaunchPosition())
+		local up = self._flight:GetLaunchUp()
+		local upV = Vector3.new(up.X, up.Y, up.Z)
+		local L = frameFromUp(base, upV)
 		local h = self._vehicle:GetHeight()
 		-- Frame the actual parts (so a free-floating anchor stays in view), not just the pad.
-		local target = base + self._vehicle:GetBuildCenter()
+		local target = L:PointToWorldSpace(self._vehicle:GetBuildCenter())
 		local cosE = math.cos(orbit.elevation)
-		local dir = Vector3.new(
+		-- Orbit direction in the launch frame, so elevation is measured off the pad's "up".
+		local dir = L:VectorToWorldSpace(Vector3.new(
 			math.cos(orbit.azimuth) * cosE,
 			math.sin(orbit.elevation),
 			math.sin(orbit.azimuth) * cosE
-		)
+		))
 		local distance = math.max(orbit.distance, h * 1.1 + 24)
-		cam.CFrame = CFrame.lookAt(target + dir * distance, target)
+		cam.CFrame = CFrame.lookAt(target + dir * distance, target, upV)
 		return
 	end
 

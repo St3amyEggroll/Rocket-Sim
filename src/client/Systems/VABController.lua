@@ -50,6 +50,18 @@ local function corner(inst, r)
 	c.Parent = inst
 end
 
+-- A CFrame at `pos` whose UP axis is `up` (matches CraftRenderer's craft orientation, so
+-- the ghost lines up with where the part will actually be placed).
+local function frameFromUp(pos, up)
+	up = (up.Magnitude > 1e-3) and up.Unit or Vector3.yAxis
+	local ref = (math.abs(up.Y) < 0.99) and Vector3.yAxis or Vector3.xAxis
+	local fwd = up:Cross(ref)
+	if fwd.Magnitude < 1e-3 then
+		fwd = up:Cross(Vector3.xAxis)
+	end
+	return CFrame.lookAt(pos, pos + fwd.Unit, up)
+end
+
 local function panel(parent, pos, size, title)
 	local f = Instance.new("Frame")
 	f.Position = pos
@@ -447,16 +459,22 @@ function VABController:_makeNodeIndicator()
 	self._node = n
 end
 
--- Build space: origin at the launch-pad point, +Y up. The VAB renders the craft at this
--- origin (CraftRenderer), so build-local CFrames map to the world by a pure translation.
+-- Build space: origin at the launch-pad point, +Y up. Because the launch site is on the
+-- equator, build space is ROTATED so build +Y maps to the launch radial (the pad's up).
+-- _launchCF is that frame; build-local CFrames map to the world through it. All snapping
+-- is done in build space (cursor ray transformed in), so the +Y-up math stays simple.
 function VABController:_buildOrigin()
 	return self._origin:ToRender(self._flight:GetLaunchPosition())
 end
+function VABController:_launchCF()
+	local up = self._flight:GetLaunchUp()
+	return frameFromUp(self:_buildOrigin(), Vector3.new(up.X, up.Y, up.Z))
+end
 function VABController:_buildToWorld(cf)
-	return CFrame.new(self:_buildOrigin()) * cf
+	return self:_launchCF() * cf
 end
 function VABController:_worldToBuild(worldCF)
-	return CFrame.new(self:_buildOrigin()):Inverse() * worldCF
+	return self:_launchCF():Inverse() * worldCF
 end
 
 function VABController:_makeGhost(def)
@@ -591,27 +609,28 @@ function VABController:_cursorOverPalette()
 	return m.X >= p.X and m.X <= p.X + s.X and m.Y >= p.Y and m.Y <= p.Y + s.Y
 end
 
--- Free placement on a camera-facing plane through the build origin (so you can drop a
--- part anywhere on screen in 3D, off the rocket).
-function VABController:_freePlane()
+-- The cursor ray transformed into BUILD space (+Y up), plus the camera look there.
+function VABController:_buildRay()
 	local cam = Workspace.CurrentCamera
 	local m = UserInputService:GetMouseLocation()
 	local ray = cam:ViewportPointToRay(m.X, m.Y)
-	local O = self:_buildOrigin()
-	local nrm = cam.CFrame.LookVector
-	local denom = ray.Direction:Dot(nrm)
-	local t = (math.abs(denom) > 1e-4) and ((O - ray.Origin):Dot(nrm) / denom) or (O - ray.Origin).Magnitude
-	local pt = ray.Origin + ray.Direction * t
-	return self:_worldToBuild(CFrame.new(pt))
+	local L = self:_launchCF()
+	return L:PointToObjectSpace(ray.Origin), L:VectorToObjectSpace(ray.Direction), L:VectorToObjectSpace(cam.CFrame.LookVector)
 end
 
--- Cursor's 3D point on a camera-facing plane through `planePoint` (world).
-function VABController:_planePoint(ray, planePoint)
-	local cam = Workspace.CurrentCamera
-	local nrm = cam.CFrame.LookVector
-	local denom = ray.Direction:Dot(nrm)
-	local t = (math.abs(denom) > 1e-4) and ((planePoint - ray.Origin):Dot(nrm) / denom) or (planePoint - ray.Origin).Magnitude
-	return ray.Origin + ray.Direction * t
+-- Intersect a build-space ray with the camera-facing plane through `planePoint`.
+function VABController:_planePoint(rayOrigin, rayDir, planePoint, nrm)
+	local denom = rayDir:Dot(nrm)
+	local t = (math.abs(denom) > 1e-4) and ((planePoint - rayOrigin):Dot(nrm) / denom)
+		or (planePoint - rayOrigin).Magnitude
+	return rayOrigin + rayDir * t
+end
+
+-- Free placement on a camera-facing plane through the build centre (drop a part anywhere
+-- on screen in 3D, off the rocket). Returns a build-space CFrame.
+function VABController:_freePlane()
+	local bo, bd, camLook = self:_buildRay()
+	return CFrame.new(self:_planePoint(bo, bd, self._vehicle:GetBuildCenter(), camLook))
 end
 
 -- Snap a horizontal direction to the nearest 15 degrees (angle snap, in snap mode).
@@ -622,11 +641,9 @@ function VABController:_snapAngleDir(dir)
 	return Vector3.new(math.cos(ang), 0, math.sin(ang))
 end
 
--- Nearest stack node (a part's top/bottom cap) to `desired`. Returns
--- (centerWorld, parentIdx, nodeWorld, dist) or nil. Build space has +Y up and no
--- rotation, so world = build origin + part offset.
+-- Nearest stack node (a part's top/bottom cap) to `desired`, all in BUILD space (+Y up).
+-- Returns (centerBuild, parentIdx, nodeBuild, dist) or nil.
 function VABController:_bestStack(desired, def, radius)
-	local O = self:_buildOrigin()
 	local gh = math.max(def.height or 0, 1.2)
 	local best, center, parent, node = radius, nil, nil, nil
 	for i, part in ipairs(self._vehicle:GetParts()) do
@@ -634,7 +651,7 @@ function VABController:_bestStack(desired, def, radius)
 		-- A body's top/bottom nodes are stack targets. Radial parts (fins, radial
 		-- decouplers) are NOT stack targets -- things mount on their SIDE, not their ends.
 		if th > 0 and not part.def.radial then
-			local wp = O + part.cf.Position
+			local wp = part.cf.Position
 			local top = wp + Vector3.new(0, th * 0.5, 0)
 			local bot = wp - Vector3.new(0, th * 0.5, 0)
 			local dt = (desired - top).Magnitude
@@ -653,13 +670,12 @@ function VABController:_bestStack(desired, def, radius)
 	return nil
 end
 
--- Nearest body side to `desired` (surface/radial attach). The SIDE (angle + radial
--- distance) snaps to the body, and you slide freely up/down it -- but ONLY while the
--- cursor is actually over that body's side. Off every part nothing snaps, so the held
--- part just rides the cursor. Targets include radial decouplers (mount a booster on the
--- decoupler's side). Returns (centerWorld, parentIdx, surfaceWorld, dist) or nil.
+-- Nearest body side to `desired` (surface/radial attach), all in BUILD space (+Y up). The
+-- SIDE (angle + radial distance) snaps to the body, and you slide freely up/down it -- but
+-- ONLY while the cursor is actually over that body's side. Off every part nothing snaps, so
+-- the held part just rides the cursor. Targets include radial decouplers (mount a booster on
+-- the decoupler's side). Returns (centerBuild, parentIdx, surfaceBuild, dist) or nil.
 function VABController:_bestSurface(desired, def, radius)
-	local O = self:_buildOrigin()
 	local gr = def.radius or 1
 	local SIDE_MARGIN = 1.5 -- a little reach past a body's ends still counts as "over it"
 	local bestScore, bestSurf = math.huge, radius
@@ -670,7 +686,7 @@ function VABController:_bestSurface(desired, def, radius)
 		-- Anything with a body height can take a side mount: tanks, pods, AND radial
 		-- decouplers. Fins (height 0) are excluded.
 		if th > 0 and pdef.surfaceTarget ~= false then
-			local wp = O + part.cf.Position
+			local wp = part.cf.Position
 			local pr = pdef.radius or 3
 			local radial = Vector3.new(desired.X - wp.X, 0, desired.Z - wp.Z)
 			local rdist = radial.Magnitude
@@ -703,20 +719,16 @@ function VABController:_bestSurface(desired, def, radius)
 	return nil
 end
 
--- Where the ghost should sit. In snap mode, find the nearest stack node AND the nearest
--- body side and take whichever is closer (KSP "guesses" which you mean by proximity);
--- in free mode, follow the cursor on a build plane. Returns
--- (buildCF, parentIdx|nil, nodeWorldPos|nil, isSurface).
+-- Where the ghost should sit, all computed in BUILD space (+Y up). In snap mode, take the
+-- nearest stack node OR body side by proximity; in free mode, follow the cursor on a build
+-- plane. Returns (buildCF, parentIdx|nil, nodeBuild|nil, isSurface).
 function VABController:_snapTarget()
-	local cam = Workspace.CurrentCamera
 	local d = self._drag
-	local m = UserInputService:GetMouseLocation()
-	local ray = cam:ViewportPointToRay(m.X, m.Y)
-	local O = self:_buildOrigin()
-	local desired = self:_planePoint(ray, O + self._vehicle:GetBuildCenter())
+	local bo, bd, camLook = self:_buildRay()
+	local desired = self:_planePoint(bo, bd, self._vehicle:GetBuildCenter(), camLook)
 
 	if not self._snapMode then
-		return self:_worldToBuild(CFrame.new(desired)), nil, nil, false
+		return CFrame.new(desired), nil, nil, false
 	end
 
 	-- Holding Alt widens the snap range (force-snap).
@@ -730,11 +742,11 @@ function VABController:_snapTarget()
 	local fCenter, fParent, fNode, fDist = self:_bestSurface(desired, d.def, radius)
 
 	if sNode and (not fNode or sDist <= fDist) then
-		return self:_worldToBuild(CFrame.new(sCenter)), sParent, sNode, false
+		return CFrame.new(sCenter), sParent, sNode, false
 	elseif fNode then
-		return self:_worldToBuild(CFrame.new(fCenter)), fParent, fNode, true
+		return CFrame.new(fCenter), fParent, fNode, true
 	end
-	return self:_worldToBuild(CFrame.new(desired)), nil, nil, false
+	return CFrame.new(desired), nil, nil, false
 end
 
 function VABController:_updateGhost()
@@ -744,10 +756,11 @@ function VABController:_updateGhost()
 	end
 	local buildCF, parent, node, isSurface = self:_snapTarget()
 	self._snap = { cf = buildCF, parent = parent, isSurface = isSurface }
-	local worldCF = self:_buildToWorld(buildCF)
+	local L = self:_launchCF()
+	local worldCF = L * buildCF
 	d.ghost.CFrame = d.pod and worldCF or (worldCF * CFrame.Angles(0, 0, math.rad(90)))
 	if node then
-		self._node.CFrame = CFrame.new(node)
+		self._node.CFrame = L * CFrame.new(node)
 		self._node.Transparency = 0.2
 	else
 		self._node.Transparency = 1

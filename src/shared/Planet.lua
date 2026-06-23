@@ -24,6 +24,7 @@ local Planet = {}
 
 local R = Config.BODY.radius
 local B = Config.BIOMES
+local LSITE = Config.LAUNCH.site -- launch site direction (unit); its terrain is flattened
 local noise = math.noise
 
 local GRASS = Enum.Material.Grass
@@ -78,11 +79,12 @@ function Planet.sample(ux: number, uy: number, uz: number): (number, Enum.Materi
 		end
 	end
 
-	-- Flatten the launch pole to plains so you never spawn in the sea / on a peak.
-	local pole = math.clamp((uy - 0.985) / 0.015, 0, 1)
-	if pole > 0 then
-		height = height * (1 - pole) + (R + detail * B.plainsAmp) * pole
-		if pole > 0.5 then
+	-- Flatten the launch site to plains so you never spawn in the sea / on a peak.
+	local dotSite = ux * LSITE.X + uy * LSITE.Y + uz * LSITE.Z
+	local site = math.clamp((dotSite - 0.985) / 0.015, 0, 1)
+	if site > 0 then
+		height = height * (1 - site) + (R + detail * B.plainsAmp) * site
+		if site > 0.5 then
 			isOcean = false
 			material = GRASS
 		end
