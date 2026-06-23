@@ -46,6 +46,17 @@ local function smoothstep(e0, e1, x)
 	return t * t * (3 - 2 * t)
 end
 
+-- Bake the day/night terminator onto a base colour for a surface direction: bright on the
+-- sun-facing side, fading across a soft terminator to a dark, cool-tinted night side.
+-- Returns (shadedColour, litFraction). The space sun is fixed, so this is baked once.
+local function bakedShade(dir, sun, night, soft, tint, base)
+	local dd = dir:Dot(sun)
+	local lit = smoothstep(-soft, soft, dd)
+	local b = night + (1 - night) * lit
+	local c = Color3.new(base.R * b, base.G * b, base.B * b):Lerp(tint, (1 - lit) * 0.5)
+	return c, lit, dd
+end
+
 -- A CFrame at `pos` whose UP axis is `up` (a tile tangent to the sphere faces outward).
 local function frameFromUp(pos, up)
 	up = (up.Magnitude > 1e-3) and up.Unit or Vector3.yAxis
@@ -60,9 +71,9 @@ end
 function PlanetRenderer:Init()
 	self._trueRadius = Planet.lodRadius()
 	self._surfaceRadius = Config.BODY.radius
-	self._atmoRadius = Config.BODY.radius + Config.ATMOSPHERE.top
-	-- A second, larger atmosphere shell for a soft outer limb glow (the scattering halo).
-	self._glowRadius = self._atmoRadius * 1.08
+	-- Cosmetic atmosphere: a thin limb only (kept close to the surface so it isn't a big
+	-- glowy bubble and is gone well below 4k studs of altitude).
+	self._atmoRadius = Config.BODY.radius + math.min(Config.ATMOSPHERE.top, 1800)
 	-- Within maxRender the body is drawn at TRUE scale/position (mesh spheres have no
 	-- size cap), so the surface and low orbit are seamless and never occlude the craft.
 	-- Beyond it (high orbit / deep space, where pulling it in can't occlude anything)
@@ -99,21 +110,17 @@ function PlanetRenderer:Start()
 	-- planet can't be lit conventionally -- instead it shows its baked albedo + terminator
 	-- directly. A dark ocean-blue base sits under the biome shell as the smooth round limb.
 	self._ball, self._ballMesh = self:_makeSphere("Planet", Color3.fromRGB(20, 42, 70), Enum.Material.Neon, 0)
-	-- Two concentric ForceField shells (brightest at the silhouette) fake the atmospheric
-	-- scattering halo: an inner haze and a softer, larger outer glow.
-	self._atmo, self._atmoMesh = self:_makeSphere("Atmosphere", Config.ATMOSPHERE.color, Enum.Material.ForceField, 0.55)
-	self._glow, self._glowMesh = self:_makeSphere(
-		"AtmoGlow",
-		Config.ATMOSPHERE.color:Lerp(Color3.new(1, 1, 1), 0.3),
-		Enum.Material.ForceField,
-		0.85
-	)
+	-- A single, thin ForceField shell for a SUBTLE atmospheric limb (low opacity so it reads
+	-- as a soft rim, not a glowing bubble).
+	self._atmo, self._atmoMesh = self:_makeSphere("Atmosphere", Config.ATMOSPHERE.color, Enum.Material.ForceField, 0.8)
 
 	-- Biome detail over the base (ocean) sphere, so you see continents from orbit. Prefer a
 	-- painted equirectangular texture; fall back to a tile shell if that isn't supported.
 	if not self:_tryTexture() then
 		self:_buildBiomeShell()
 	end
+	-- A translucent cloud layer above the surface (from orbit).
+	self:_buildCloudShell()
 
 	-- Update after the camera has been positioned for this frame.
 	RunService:BindToRenderStep("RocketSim_Planet", Enum.RenderPriority.Camera.Value + 2, function()
@@ -162,12 +169,8 @@ function PlanetRenderer:_buildBiomeShell()
 			local dir = Vector3.new(dx, dy, dz)
 			local albedo = Planet.lodColorForUnit(dx, dy, dz)
 
-			-- Baked terminator: brightness from the sun-facing dot, softened across the
-			-- day/night line, with a cool tint over the shadowed hemisphere.
-			local dd = dir:Dot(sun)
-			local lit = smoothstep(-soft, soft, dd)
-			local b = night + (1 - night) * lit
-			local c = Color3.new(albedo.R * b, albedo.G * b, albedo.B * b):Lerp(tint, (1 - lit) * 0.5)
+			-- Baked terminator (sunlit day side -> dark, cool night side).
+			local c, lit, dd = bakedShade(dir, sun, night, soft, tint, albedo)
 			-- Ocean sun-glint: a tight specular hotspot near the sub-solar point.
 			if dd > 0 and Planet.isOceanUnit(dx, dy, dz) then
 				local s = (dd ^ specTight) * oceanSpec * lit
@@ -196,6 +199,75 @@ function PlanetRenderer:_setShell(visible)
 	if visible ~= self._shellVisible then
 		self._shellVisible = visible
 		self._shell.Parent = visible and Workspace or nil
+	end
+end
+
+-- Build a translucent cloud layer just above the surface: white, self-lit (Neon) tiles
+-- placed where a low-frequency fbm "cloud" field is dense, with the same baked day/night
+-- terminator as the surface so cloud tops catch the sun and the night side goes dark.
+-- Shown only from orbit (like the biome shell), so it never clips terrain up close.
+function PlanetRenderer:_buildCloudShell()
+	local folder = Instance.new("Folder")
+	folder.Name = "CloudShell"
+	self._clouds = folder
+	self._cloudsVisible = false
+
+	local L = Config.LOD
+	local sun = (L.sunDir and L.sunDir.Magnitude > 1e-3) and L.sunDir.Unit or Vector3.new(0.55, 0.5, -0.66).Unit
+	local night = L.nightShade or 0.16
+	local soft = L.termSoftness or 0.30
+	local tint = (L.nightTint or Color3.fromRGB(16, 24, 42)):Lerp(Color3.fromRGB(40, 48, 70), 0.5)
+	local opacity = L.cloudOpacity or 0.34
+	local cover = L.cloudCover or 0.18 -- fbm threshold (higher = fewer clouds)
+	local freq = L.cloudFreq or 0.0011
+
+	local s = self._surfaceRadius
+	local R = s + (L.cloudAlt or 480)
+	local Nlat = math.max(6, math.floor((L.latBands or 28) * 0.85))
+	local lonBands = math.max(8, math.floor((L.lonBands or 72) * 0.85))
+	local cellH = (math.pi * R) / Nlat
+	local WHITE = Color3.fromRGB(244, 248, 252)
+	for i = 0, Nlat - 1 do
+		local lat = -math.pi / 2 + (i + 0.5) * (math.pi / Nlat)
+		local cl, sl = math.cos(lat), math.sin(lat)
+		local Nlon = math.max(3, math.floor(lonBands * cl + 0.5))
+		local cellW = (2 * math.pi * R * cl) / Nlon
+		for j = 0, Nlon - 1 do
+			local lon = (j + 0.5) * (2 * math.pi / Nlon)
+			local dx, dy, dz = cl * math.cos(lon), sl, cl * math.sin(lon)
+			-- Two-octave cloud density field (offset from the terrain noise).
+			local px, py, pz = dx * s * freq, dy * s * freq, dz * s * freq
+			local density = math.noise(px + 41.2, py - 8.7, pz + 19.3)
+				+ 0.5 * math.noise(px * 2.3 - 5.1, py * 2.3 + 31.7, pz * 2.3 - 12.9)
+			if density > cover then
+				local dir = Vector3.new(dx, dy, dz)
+				local c = bakedShade(dir, sun, night, soft, tint, WHITE)
+				-- Thicker clouds (further over threshold) are a touch more opaque.
+				local thick = math.clamp((density - cover) / 0.5, 0, 1)
+				local tile = Instance.new("Part")
+				tile.Anchored = true
+				tile.CanCollide = false
+				tile.CanQuery = false
+				tile.CanTouch = false
+				tile.CastShadow = false
+				tile.Size = Vector3.new(cellW * 2.0 + 8, 2, cellH * 2.0 + 8)
+				tile.Color = c
+				tile.Material = Enum.Material.Neon
+				tile.Transparency = opacity + (1 - opacity) * 0.4 * (1 - thick)
+				tile.CFrame = frameFromUp(dir * R, dir)
+				tile.Parent = folder
+			end
+		end
+	end
+end
+
+function PlanetRenderer:_setClouds(visible)
+	if not self._clouds then
+		return
+	end
+	if visible ~= self._cloudsVisible then
+		self._cloudsVisible = visible
+		self._clouds.Parent = visible and Workspace or nil
 	end
 end
 
@@ -249,14 +321,13 @@ function PlanetRenderer:_update()
 		if self._ball.Transparency ~= 1 then
 			self._ball.Transparency = 1
 			self._atmo.Transparency = 1
-			self._glow.Transparency = 1
 		end
 		self:_setShell(false)
+		self:_setClouds(false)
 		return
 	elseif self._ball.Transparency ~= 0 then
 		self._ball.Transparency = 0
-		self._atmo.Transparency = 0.55
-		self._glow.Transparency = 0.85
+		self._atmo.Transparency = 0.8
 	end
 
 	local center = self._origin:ToRender(Orbit.vec(0, 0, 0))
@@ -268,6 +339,7 @@ function PlanetRenderer:_update()
 	-- never poke through the ground) and still within render range (far out it's just a dot).
 	local fromSpace = dist > (self._surfaceRadius + Config.TERRAIN.streamOutAlt)
 	self:_setShell(not self._textured and fromSpace and dist <= self._maxRender)
+	self:_setClouds(fromSpace and dist <= self._maxRender)
 
 	local renderCenter, scale
 	if dist <= self._maxRender or dist < 1e-3 then
@@ -283,9 +355,6 @@ function PlanetRenderer:_update()
 	self:_apply(self._ballMesh, self._ball, self._trueRadius * 2 * scale, renderCenter)
 	if self._atmo then
 		self:_apply(self._atmoMesh, self._atmo, self._atmoRadius * 2 * scale, renderCenter)
-	end
-	if self._glow then
-		self:_apply(self._glowMesh, self._glow, self._glowRadius * 2 * scale, renderCenter)
 	end
 end
 

@@ -151,6 +151,11 @@ Config.LOD = {
 	nightTint = Color3.fromRGB(16, 24, 42), -- cool tint blended into the shadowed side
 	oceanSpec = 0.55, -- ocean sun-glint (specular hotspot) strength
 	oceanSpecTight = 64, -- glint exponent (higher = tighter, sharper highlight)
+	-- Cloud layer (a translucent shell above the surface, seen from orbit).
+	cloudAlt = 480, -- studs above sea level
+	cloudCover = 0.18, -- fbm density threshold (higher = fewer/sparser clouds)
+	cloudFreq = 0.0011, -- cloud-field frequency (smaller = larger cloud masses)
+	cloudOpacity = 0.34, -- base tile transparency (lower = thicker clouds)
 }
 
 Config.CRAFT = {
