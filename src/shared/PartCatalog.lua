@@ -88,6 +88,7 @@ PartCatalog.parts = {
 		color = Color3.fromRGB(150, 80, 70),
 		shape = "fins",
 		drag = 0.9, -- lots of drag where they sit -> pulls the centre of pressure there
+		radial = true, -- surface-attaches to a body's side
 	},
 	Decoupler = {
 		id = "Decoupler",
@@ -100,10 +101,22 @@ PartCatalog.parts = {
 		shape = "decoupler",
 		drag = 0.15,
 	},
+	RadialDecoupler = {
+		id = "RadialDecoupler",
+		name = "Radial Decoupler",
+		category = "structure",
+		mass = 0.1,
+		height = 2, -- a small side mount; its booster subtree drops when fired
+		radius = 1,
+		color = Color3.fromRGB(120, 92, 72),
+		shape = "decoupler",
+		drag = 0.1,
+		radial = true, -- surface-attaches to a body's side (holds a side booster)
+	},
 }
 
 -- Display order in the VAB palette.
-PartCatalog.order = { "Pod", "TankS", "TankL", "EngineMain", "EngineVac", "Fin", "Decoupler" }
+PartCatalog.order = { "Pod", "TankS", "TankL", "EngineMain", "EngineVac", "Fin", "Decoupler", "RadialDecoupler" }
 
 function PartCatalog.get(id)
 	return PartCatalog.parts[id]

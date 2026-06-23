@@ -78,7 +78,9 @@ function VABController:Init()
 	self._activeCat = CATS[1].id
 	self._selected = nil -- part index of the last placed/inspected part
 	self._drag = nil -- { id, def, ghost, pod, originalCF, originalParent }
-	self._snap = nil -- { cf, parent } the ghost will commit to on release
+	self._snap = nil -- { cf, parent, isSurface } the ghost will commit to on release
+	self._snapMode = true -- node/angle snapping on (vs free placement)
+	self._symmetry = 1 -- 1..8 radial copies for surface-attached parts
 end
 
 function VABController:Start()
@@ -146,6 +148,67 @@ function VABController:_build(parentGui)
 	self:_buildPalette(gui)
 	self:_buildRight(gui)
 	self:_buildControls(gui)
+	self:_buildTools(gui)
+end
+
+-- Snap-mode + symmetry toggles (top centre, under the title).
+function VABController:_buildTools(gui)
+	local frame = Instance.new("Frame")
+	frame.AnchorPoint = Vector2.new(0.5, 0)
+	frame.Position = UDim2.new(0.5, 0, 0, 46)
+	frame.Size = UDim2.fromOffset(320, 32)
+	frame.BackgroundTransparency = 1
+	frame.Parent = gui
+	local layout = Instance.new("UIListLayout")
+	layout.FillDirection = Enum.FillDirection.Horizontal
+	layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+	layout.Padding = UDim.new(0, 8)
+	layout.Parent = frame
+
+	local function toolBtn(w)
+		local b = Instance.new("TextButton")
+		b.Size = UDim2.fromOffset(w, 30)
+		b.BackgroundColor3 = ROW
+		b.BorderSizePixel = 0
+		b.Font = Enum.Font.GothamBold
+		b.TextSize = 13
+		b.TextColor3 = TEXT
+		b.AutoButtonColor = true
+		b.Parent = frame
+		corner(b, 6)
+		return b
+	end
+
+	self._snapBtn = toolBtn(152)
+	self._snapBtn.Activated:Connect(function()
+		self:_toggleSnap()
+	end)
+	self._symBtn = toolBtn(152)
+	self._symBtn.Activated:Connect(function()
+		self:_cycleSymmetry(1)
+	end)
+	self:_updateToolBtns()
+end
+
+function VABController:_toggleSnap()
+	self._snapMode = not self._snapMode
+	self:_updateToolBtns()
+end
+
+function VABController:_cycleSymmetry(delta)
+	self._symmetry = ((self._symmetry - 1 + delta) % 8) + 1
+	self:_updateToolBtns()
+end
+
+function VABController:_updateToolBtns()
+	if self._snapBtn then
+		self._snapBtn.Text = "Snap [C]: " .. (self._snapMode and "ON" or "OFF (free)")
+		self._snapBtn.BackgroundColor3 = self._snapMode and Color3.fromRGB(50, 110, 70) or ROW
+	end
+	if self._symBtn then
+		self._symBtn.Text = "Symmetry [X]: " .. self._symmetry .. "x"
+		self._symBtn.BackgroundColor3 = (self._symmetry > 1) and Color3.fromRGB(60, 90, 130) or ROW
+	end
 end
 
 function VABController:_buildPalette(gui)
@@ -361,7 +424,7 @@ function VABController:_buildControls(gui)
 	hint.Font = Enum.Font.Code
 	hint.TextSize = 13
 	hint.TextColor3 = DIM
-	hint.Text = "Hold + drag a part onto the rocket (or anywhere to float)  •  drag a placed part to move it  •  drop on the parts list to delete  •  Esc cancels  •  RMB orbit / wheel zoom"
+	hint.Text = "Hold + drag a part near the rocket -- it snaps to the nearest node  •  C snap on/off  •  X symmetry  •  hold Alt to force-snap  •  drop on the parts list to delete  •  Esc cancels  •  RMB orbit"
 	hint.Parent = gui
 end
 
@@ -483,14 +546,38 @@ function VABController:_onRelease()
 	local snap = self._snap
 	local cf = snap and snap.cf or self:_freePlane()
 	local parent = snap and snap.parent or nil
+	local isSurface = snap and snap.isSurface
 	d.ghost:Destroy()
 	self._drag = nil
 	self._snap = nil
 	if self._node then
 		self._node.Transparency = 1
 	end
-	self._selected = self._vehicle:AddPartAt(d.id, cf, parent)
+	-- Symmetry: a surface-attached part places N evenly-spaced copies around the parent's
+	-- axis; everything else places a single part.
+	if isSurface and parent and self._symmetry > 1 then
+		self._selected = self:_placeSymmetry(d.id, cf, parent, self._symmetry)
+	else
+		self._selected = self._vehicle:AddPartAt(d.id, cf, parent)
+	end
 	self:_updatePartPanel()
+end
+
+function VABController:_placeSymmetry(id, cf, parent, n)
+	local parentPart = self._vehicle:GetParts()[parent]
+	if not parentPart then
+		return self._vehicle:AddPartAt(id, cf, parent)
+	end
+	local px, pz = parentPart.cf.X, parentPart.cf.Z
+	local ox, oz = cf.X - px, cf.Z - pz
+	local y = cf.Y
+	local last
+	for k = 0, n - 1 do
+		local a = k * (2 * math.pi / n)
+		local ca, sa = math.cos(a), math.sin(a)
+		last = self._vehicle:AddPartAt(id, CFrame.new(px + ox * ca - oz * sa, y, pz + ox * sa + oz * ca), parent)
+	end
+	return last
 end
 
 function VABController:_cursorOverPalette()
@@ -517,54 +604,118 @@ function VABController:_freePlane()
 	return self:_worldToBuild(CFrame.new(pt))
 end
 
--- Compute where the ghost should sit: snap to a hit part's cap (stack) or side (surface),
--- else free placement. Returns (buildCF, parentIndex|nil, nodeWorldPos|nil).
+-- Cursor's 3D point on a camera-facing plane through `planePoint` (world).
+function VABController:_planePoint(ray, planePoint)
+	local cam = Workspace.CurrentCamera
+	local nrm = cam.CFrame.LookVector
+	local denom = ray.Direction:Dot(nrm)
+	local t = (math.abs(denom) > 1e-4) and ((planePoint - ray.Origin):Dot(nrm) / denom) or (planePoint - ray.Origin).Magnitude
+	return ray.Origin + ray.Direction * t
+end
+
+-- Snap a horizontal direction to the nearest 15 degrees (angle snap, in snap mode).
+function VABController:_snapAngleDir(dir)
+	local ang = math.atan2(dir.Z, dir.X)
+	local step = math.rad(15)
+	ang = math.floor(ang / step + 0.5) * step
+	return Vector3.new(math.cos(ang), 0, math.sin(ang))
+end
+
+-- Nearest stack node (a part's top/bottom cap) to `desired`. Returns
+-- (centerWorld, parentIdx, nodeWorld, dist) or nil. Build space has +Y up and no
+-- rotation, so world = build origin + part offset.
+function VABController:_bestStack(desired, def, radius)
+	local O = self:_buildOrigin()
+	local gh = math.max(def.height or 0, 1.2)
+	local best, center, parent, node = radius, nil, nil, nil
+	for i, part in ipairs(self._vehicle:GetParts()) do
+		local th = part.def.height or 0
+		if th > 0 and not part.def.radial then
+			local wp = O + part.cf.Position
+			local top = wp + Vector3.new(0, th * 0.5, 0)
+			local bot = wp - Vector3.new(0, th * 0.5, 0)
+			local dt = (desired - top).Magnitude
+			if dt < best then
+				best, center, parent, node = dt, top + Vector3.new(0, gh * 0.5, 0), i, top
+			end
+			local db = (desired - bot).Magnitude
+			if db < best then
+				best, center, parent, node = db, bot - Vector3.new(0, gh * 0.5, 0), i, bot
+			end
+		end
+	end
+	if center then
+		return center, parent, node, best
+	end
+	return nil
+end
+
+-- Nearest body side to `desired` (surface/radial attach). Returns
+-- (centerWorld, parentIdx, surfaceWorld, dist) or nil.
+function VABController:_bestSurface(desired, def, radius)
+	local O = self:_buildOrigin()
+	local gr = def.radius or 1
+	local best, center, parent, node = radius, nil, nil, nil
+	for i, part in ipairs(self._vehicle:GetParts()) do
+		local pdef = part.def
+		local th = pdef.height or 0
+		if th > 0 and pdef.surfaceTarget ~= false and not pdef.radial then
+			local wp = O + part.cf.Position
+			local along = math.clamp(desired.Y - wp.Y, -th * 0.5, th * 0.5)
+			local axisPt = wp + Vector3.new(0, along, 0)
+			local radial = Vector3.new(desired.X - wp.X, 0, desired.Z - wp.Z)
+			local rdist = radial.Magnitude
+			local surfDist = math.abs(rdist - (pdef.radius or 3))
+			if surfDist < best then
+				local rdir = (rdist > 1e-3) and radial.Unit or Vector3.new(1, 0, 0)
+				if self._snapMode then
+					rdir = self:_snapAngleDir(rdir)
+				end
+				best = surfDist
+				center = axisPt + rdir * ((pdef.radius or 3) + gr)
+				parent = i
+				node = axisPt + rdir * (pdef.radius or 3)
+			end
+		end
+	end
+	if center then
+		return center, parent, node, best
+	end
+	return nil
+end
+
+-- Where the ghost should sit. In snap mode, find the nearest stack node AND the nearest
+-- body side and take whichever is closer (KSP "guesses" which you mean by proximity);
+-- in free mode, follow the cursor on a build plane. Returns
+-- (buildCF, parentIdx|nil, nodeWorldPos|nil, isSurface).
 function VABController:_snapTarget()
 	local cam = Workspace.CurrentCamera
 	local d = self._drag
 	local m = UserInputService:GetMouseLocation()
 	local ray = cam:ViewportPointToRay(m.X, m.Y)
+	local O = self:_buildOrigin()
+	local desired = self:_planePoint(ray, O + self._vehicle:GetBuildCenter())
 
-	local craft = Workspace:FindFirstChild("Craft")
-	if craft then
-		local params = RaycastParams.new()
-		params.FilterType = Enum.RaycastFilterType.Include
-		params.FilterDescendantsInstances = { craft }
-		local hit = Workspace:Raycast(ray.Origin, ray.Direction * 8000, params)
-		if hit and hit.Instance then
-			local idx = hit.Instance:GetAttribute("idx")
-			local part = idx and self._vehicle:GetParts()[idx]
-			if part then
-				local tdef = part.def
-				local th, tr = tdef.height or 0, tdef.radius or 3
-				local gh = math.max(d.def.height or 0, 1.2)
-				local gr = d.def.radius or 3
-				local targetWorld = self:_buildToWorld(part.cf)
-				local localN = targetWorld:VectorToObjectSpace(hit.Normal)
-				if math.abs(localN.Y) > 0.6 then
-					-- stack onto the cap the surface normal points out of
-					local sign = (localN.Y >= 0) and 1 or -1
-					local buildCF = part.cf * CFrame.new(0, sign * (th * 0.5 + gh * 0.5), 0)
-					local node = (targetWorld * CFrame.new(0, sign * th * 0.5, 0)).Position
-					return buildCF, idx, node
-				else
-					-- surface (radial) attach: out from the target axis to its skin + radius
-					local axisY = targetWorld.UpVector
-					local rel = hit.Position - targetWorld.Position
-					local along = rel:Dot(axisY)
-					local radial = rel - axisY * along
-					if radial.Magnitude < 1e-3 then
-						radial = Vector3.new(1, 0, 0)
-					end
-					radial = radial.Unit
-					local centerWorld = targetWorld.Position + axisY * along + radial * (tr + gr)
-					return self:_worldToBuild(CFrame.new(centerWorld)), idx, hit.Position
-				end
-			end
-		end
+	if not self._snapMode then
+		return self:_worldToBuild(CFrame.new(desired)), nil, nil, false
 	end
 
-	return self:_freePlane(), nil, nil
+	-- Holding Alt widens the snap range (force-snap).
+	local force = UserInputService:IsKeyDown(Enum.KeyCode.LeftAlt) or UserInputService:IsKeyDown(Enum.KeyCode.RightAlt)
+	local radius = force and 80 or 22
+
+	local sCenter, sParent, sNode, sDist
+	if not d.def.radial then
+		sCenter, sParent, sNode, sDist = self:_bestStack(desired, d.def, radius)
+	end
+	local fCenter, fParent, fNode, fDist = self:_bestSurface(desired, d.def, radius)
+
+	if sNode and (not fNode or sDist <= fDist) then
+		return self:_worldToBuild(CFrame.new(sCenter)), sParent, sNode, false
+	elseif fNode then
+		return self:_worldToBuild(CFrame.new(fCenter)), fParent, fNode, true
+	end
+	return self:_worldToBuild(CFrame.new(desired)), nil, nil, false
 end
 
 function VABController:_updateGhost()
@@ -572,8 +723,8 @@ function VABController:_updateGhost()
 	if not d or not Workspace.CurrentCamera then
 		return
 	end
-	local buildCF, parent, node = self:_snapTarget()
-	self._snap = { cf = buildCF, parent = parent }
+	local buildCF, parent, node, isSurface = self:_snapTarget()
+	self._snap = { cf = buildCF, parent = parent, isSurface = isSurface }
 	local worldCF = self:_buildToWorld(buildCF)
 	d.ghost.CFrame = d.pod and worldCF or (worldCF * CFrame.Angles(0, 0, math.rad(90)))
 	if node then
@@ -615,6 +766,11 @@ function VABController:_onInputBegan(input, gameProcessed)
 		self:_tryPickup()
 	elseif input.KeyCode == Enum.KeyCode.Escape then
 		self:_cancelDrag(true)
+	elseif input.KeyCode == Enum.KeyCode.C then
+		self:_toggleSnap()
+	elseif input.KeyCode == Enum.KeyCode.X then
+		local dec = UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) or UserInputService:IsKeyDown(Enum.KeyCode.RightShift)
+		self:_cycleSymmetry(dec and -1 or 1)
 	elseif input.KeyCode == Enum.KeyCode.Delete or input.KeyCode == Enum.KeyCode.Backspace then
 		if self._drag then
 			self:_cancelDrag(false)

@@ -93,4 +93,4 @@ for _, name in ipairs(startOrder) do
 	end
 end
 
-print("[RocketSim] Client systems started -- build P11.0 (KSP 3D builder: drag-drop parts, free anchor, stack/surface snap, pick-up-to-move).")
+print("[RocketSim] Client systems started -- build P11.1 (VAB pass 1: proximity node snapping, symmetry 1-8, snap/free modes, radial decoupler).")
