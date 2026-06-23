@@ -820,6 +820,16 @@ function VehicleController:GetChuteDragArea(): number
 	return a
 end
 
+-- True if the active craft carries landing legs (a more forgiving touchdown).
+function VehicleController:HasLandingLegs(): boolean
+	for i, p in ipairs(self._parts) do
+		if self:_isActive(i) and p.def.landingLeg then
+			return true
+		end
+	end
+	return false
+end
+
 -- True if a parachute has been staged (so the renderer can show its canopy in air).
 function VehicleController:HasDeployedChute(): boolean
 	for i, p in ipairs(self._parts) do

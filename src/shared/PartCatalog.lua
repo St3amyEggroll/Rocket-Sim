@@ -182,6 +182,19 @@ PartCatalog.parts = {
 		decoupler = true, -- a separation point: firing its stage drops the booster on it
 		-- ...but other parts may still STACK onto it (build the booster off its node).
 	},
+	LandingLeg = {
+		id = "LandingLeg",
+		name = "Landing Legs",
+		category = "structure",
+		mass = 0.12,
+		height = 0, -- a side mount; sits at wherever it is on the body
+		radius = 1.2,
+		color = Color3.fromRGB(170, 172, 180),
+		shape = "leg",
+		drag = 0.1,
+		radial = true, -- surface-attaches to a body's side
+		landingLeg = true, -- a set of legs makes touchdown more forgiving
+	},
 }
 
 -- Display order in the VAB palette.
@@ -199,6 +212,7 @@ PartCatalog.order = {
 	"Parachute",
 	"Decoupler",
 	"RadialDecoupler",
+	"LandingLeg",
 }
 
 function PartCatalog.get(id)

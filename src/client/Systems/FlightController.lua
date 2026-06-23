@@ -532,7 +532,9 @@ function FlightController:_checkTouchdown()
 	self._state.velocity = Orbit.vec(0, 0, 0)
 	self._landed = true
 
-	if impact > Config.FLIGHT.crashSpeed then
+	-- Landing legs roughly double the survivable touchdown speed.
+	local crashSpeed = Config.FLIGHT.crashSpeed * (self._vehicle:HasLandingLegs() and 2 or 1)
+	if impact > crashSpeed then
 		self._crashed = true -- too fast: the renderer blows the whole rocket apart
 		self._status = "Crashed"
 	else

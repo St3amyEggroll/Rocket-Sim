@@ -14,6 +14,7 @@ local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Orbit = require(Shared:WaitForChild("OrbitMechanics"))
 local Registry = require(Shared:WaitForChild("Registry"))
 local Planet = require(Shared:WaitForChild("Planet"))
+local PartPreview = require(Shared:WaitForChild("PartPreview"))
 
 local CraftRenderer = {}
 
@@ -226,23 +227,32 @@ function CraftRenderer:_rebuildCraft()
 		if def.shape == "fins" then
 			self:_buildFins(model, cf.Position, def.radius, stage, index)
 		else
-			local mat = (def.category == "engine") and Enum.Material.Metal or Enum.Material.SmoothPlastic
-			tag(addCylinder(model, def.name, def.height, def.radius, def.color, mat, cf), stage, index)
-			local b = cf.Y - def.height * 0.5
-			if b < bottomY then
+			-- Build the part's art (shared with the palette/staging icons). Axial parts are
+			-- just translated to their build position; radial parts (side mounts, legs) are
+			-- oriented so their art points outward from the stack axis.
+			local placeCF
+			if def.radial then
+				local out = Vector3.new(cf.X, 0, cf.Z)
+				out = (out.Magnitude > 1e-3) and out.Unit or Vector3.xAxis
+				placeCF = CFrame.fromMatrix(cf.Position, out, Vector3.yAxis)
+			else
+				placeCF = cf
+			end
+			local sub = Instance.new("Model")
+			PartPreview.geometry(sub, def)
+			for _, bp in ipairs(sub:GetChildren()) do
+				if bp:IsA("BasePart") then
+					bp.CFrame = placeCF * bp.CFrame
+					tag(bp, stage, index)
+					bp.Parent = model
+				end
+			end
+			sub:Destroy()
+
+			local b = cf.Y - (def.height or 0) * 0.5
+			if b < bottomY and not def.radial then
 				bottomY = b
 				bottomRadius = def.radius
-			end
-			if def.shape == "pod" then
-				tag(makePart(model, "Dome", {
-					Shape = Enum.PartType.Ball,
-					Size = Vector3.new(def.radius * 1.8, def.radius * 1.4, def.radius * 1.8),
-					Color = def.color,
-					Material = Enum.Material.SmoothPlastic,
-					CFrame = cf * CFrame.new(0, def.height * 0.5, 0),
-				}), stage, index)
-			elseif def.shape == "engine" then
-				tag(addCylinder(model, "Nozzle", def.height * 0.5, def.radius * 0.66, Color3.fromRGB(40, 42, 48), Enum.Material.Metal, cf * CFrame.new(0, -def.height * 0.6, 0)), stage, index)
 			end
 		end
 	end
