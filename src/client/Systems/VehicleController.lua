@@ -54,6 +54,7 @@ function VehicleController:Init()
 	self._autoStage = true -- auto-assign stages until the player edits the staging panel
 	self._stageFloor = 0 -- lowest number of stages (the panel can add empty ones)
 	self._nextSymId = 1 -- ids shared by parts placed together as a symmetry set
+	self._runtimeVer = 0 -- bumped whenever mass/active-set/fuel changes (caches key off it)
 
 	-- Default rocket: stack the default design vertically (bottom -> top) in build space.
 	self._parts = {}
@@ -685,6 +686,7 @@ end
 -- flight, a part is active iff it is still connected to the keep-root (command pod)
 -- once every fired decoupler is cut out.
 function VehicleController:_computeActive()
+	self._runtimeVer += 1 -- active set changed: invalidate the per-frame caches
 	local parts = self._parts
 	local active = {}
 	if self._editing then
@@ -783,7 +785,18 @@ end
 
 -- Engines that are firing right now: active, ignited (stage already reached), with fuel.
 -- Each carries its build-space lateral position so flight can build the thrust torque.
+-- Cached per runtime version (called several times a frame).
 function VehicleController:GetActiveEngines()
+	if self._enginesCache and self._enginesVer == self._runtimeVer then
+		return self._enginesCache
+	end
+	local out = self:_computeActiveEngines()
+	self._enginesCache = out
+	self._enginesVer = self._runtimeVer
+	return out
+end
+
+function VehicleController:_computeActiveEngines()
 	local out = {}
 	if self._editing then
 		return out
@@ -844,6 +857,7 @@ function VehicleController:ConsumeFuel(dt, throttle)
 			self._sectionFuel[sec] = math.max(0, (self._sectionFuel[sec] or 0) - flow)
 		end
 	end
+	self._runtimeVer += 1 -- fuel (hence mass / thrust / CoM) changed: invalidate caches
 end
 
 function VehicleController:CanStage(): boolean
@@ -1018,7 +1032,18 @@ end
 --   length   = base -> top extent
 --   base     = build-space Y of the lowest point (for GetFlightOffset / staging)
 --   comX/comZ = build-space lateral CoM (the thrust axis + the thrust-torque pivot)
+-- Cached per runtime version (called several times a frame by flight + the renderer).
 function VehicleController:GetRotProfile()
+	if self._profCache and self._profVer == self._runtimeVer then
+		return self._profCache
+	end
+	local prof = self:_computeRotProfile()
+	self._profCache = prof
+	self._profVer = self._runtimeVer
+	return prof
+end
+
+function VehicleController:_computeRotProfile()
 	local items = {}
 	local totalM, sumMY, sumMX, sumMZ = 0, 0, 0, 0
 	local sumDrag, sumDragY = 0, 0

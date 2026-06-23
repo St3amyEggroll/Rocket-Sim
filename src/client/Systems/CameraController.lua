@@ -116,18 +116,33 @@ function CameraController:_update(state, info)
 	local up = Vector3.new(p.x, p.y, p.z)
 	up = (up.Magnitude > 1e-3) and up.Unit or Vector3.yAxis
 
-	-- Horizontal forward = velocity projected onto the local horizon (lies in the
-	-- orbital plane). Fall back to the nose, then to the last good forward.
-	local function horiz(v)
-		local h = v - up * v:Dot(up)
-		return (h.Magnitude > 1e-3) and h.Unit or nil
+	-- Camera heading: the velocity projected onto the local horizon. When flying straight
+	-- up/down (ascent/descent) the horizontal part is tiny and its DIRECTION is noise, which
+	-- used to spin the view. So only adopt it when there's real horizontal motion; otherwise
+	-- keep the previous heading (re-projected onto the current horizon) and ease toward it.
+	local function horizOf(vec)
+		return vec - up * vec:Dot(up)
 	end
+	local last = horizOf(self._lastFwd or Vector3.zAxis)
+	if last.Magnitude < 1e-3 then
+		last = horizOf(Vector3.xAxis)
+		if last.Magnitude < 1e-3 then
+			last = horizOf(Vector3.zAxis)
+		end
+	end
+	last = last.Unit
+
 	local v = state.velocity
-	local fwd = horiz(Vector3.new(v.x, v.y, v.z))
-	if not fwd then
-		local nose = info and info.attitude and info.attitude.LookVector
-		fwd = (nose and horiz(nose)) or self._lastFwd
+	local v3 = Vector3.new(v.x, v.y, v.z)
+	local hv = horizOf(v3)
+	local desired = last
+	if hv.Magnitude > 6 and hv.Magnitude > v3.Magnitude * 0.12 then
+		desired = hv.Unit
 	end
+	-- Ease toward the desired heading so a gravity turn pans smoothly instead of snapping.
+	local fwd = last:Lerp(desired, 0.1)
+	fwd = horizOf(fwd)
+	fwd = (fwd.Magnitude > 1e-3) and fwd.Unit or desired
 	self._lastFwd = fwd
 
 	-- Render at the Terra-centric position (state is relative to the active body).
