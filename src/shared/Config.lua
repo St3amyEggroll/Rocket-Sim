@@ -163,6 +163,17 @@ Config.INPUT = {
 	throttleRate = 0.6,
 }
 
+-- Sound asset ids (SoundController). These are placeholders -- swap them for your own
+-- uploaded audio for the best result; if an id is invalid the sound simply stays silent
+-- (nothing breaks). engine + wind loop; explosion is a one-shot on a crash.
+Config.SOUND = {
+	engine = "rbxassetid://142376088", -- looped engine rumble
+	wind = "rbxassetid://9116367343", -- looped wind
+	explosion = "rbxassetid://142070127", -- one-shot explosion
+	engineMaxVolume = 0.55,
+	windMaxVolume = 0.5,
+}
+
 Config.TIMEWARP = {
 	levels = { 1, 5, 10, 25, 50, 100 },
 }

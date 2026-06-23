@@ -270,6 +270,47 @@ function CraftRenderer:_rebuildCraft()
 	light.Enabled = false
 	light.Parent = flame
 
+	-- Exhaust plume + smoke particles, shot down the stack (the flame's local -Y). Rates
+	-- are driven by throttle in _render.
+	local exhaust = Instance.new("ParticleEmitter")
+	exhaust.Texture = "rbxasset://textures/particles/fire_main.dds"
+	exhaust.Color = ColorSequence.new(Color3.fromRGB(255, 230, 150), Color3.fromRGB(255, 120, 40))
+	exhaust.Size = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, bottomRadius * 1.4),
+		NumberSequenceKeypoint.new(1, bottomRadius * 0.3),
+	})
+	exhaust.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0.1),
+		NumberSequenceKeypoint.new(1, 1),
+	})
+	exhaust.Lifetime = NumberRange.new(0.18, 0.34)
+	exhaust.Speed = NumberRange.new(55, 80)
+	exhaust.SpreadAngle = Vector2.new(7, 7)
+	exhaust.EmissionDirection = Enum.NormalId.Bottom
+	exhaust.LightEmission = 0.9
+	exhaust.Rate = 0
+	exhaust.Parent = flame
+
+	local smoke = Instance.new("ParticleEmitter")
+	smoke.Texture = "rbxasset://textures/particles/smoke_main.dds"
+	smoke.Color = ColorSequence.new(Color3.fromRGB(180, 180, 185), Color3.fromRGB(110, 110, 115))
+	smoke.Size = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, bottomRadius * 1.2),
+		NumberSequenceKeypoint.new(1, bottomRadius * 4),
+	})
+	smoke.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0.4),
+		NumberSequenceKeypoint.new(1, 1),
+	})
+	smoke.Lifetime = NumberRange.new(0.6, 1.2)
+	smoke.Speed = NumberRange.new(12, 26)
+	smoke.SpreadAngle = Vector2.new(16, 16)
+	smoke.EmissionDirection = Enum.NormalId.Bottom
+	smoke.Rate = 0
+	smoke.Parent = flame
+	self._exhaust = exhaust
+	self._smoke = smoke
+
 	-- Reentry plasma envelope: a neon shell wrapping the craft, hidden until the
 	-- flight loop reports reentry heating (then it glows orange -> white-hot).
 	local glowH = math.max(prof.length, 6)
@@ -381,13 +422,21 @@ function CraftRenderer:_render(state, info)
 	end
 
 	local throttle = (info and info.throttle) or 0
-	if info and info.powered and throttle > 0 then
+	local burning = info and info.powered and throttle > 0
+	if burning then
 		self._flame.Transparency = 0.2
 		self._flame.Size = Vector3.new(self._flame.Size.X, 8 + 26 * throttle, self._flame.Size.Z)
 		self._flameLight.Enabled = true
+		self._flameLight.Brightness = 4 + 4 * throttle
 	else
 		self._flame.Transparency = 1
 		self._flameLight.Enabled = false
+	end
+	-- Exhaust + smoke scale with throttle; in air the smoke billows (launch dust).
+	if self._exhaust then
+		local thick = info and info.inAtmo
+		self._exhaust.Rate = burning and (90 * throttle) or 0
+		self._smoke.Rate = burning and ((thick and 60 or 22) * throttle) or 0
 	end
 
 	if self._chute then
