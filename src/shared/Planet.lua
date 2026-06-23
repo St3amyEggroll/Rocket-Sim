@@ -124,25 +124,56 @@ function Planet.isOceanUnit(ux: number, uy: number, uz: number): boolean
 	return isOcean
 end
 
--- A flat LOD colour for a unit direction -- the biome's "from orbit" colour, so the
--- distant planet shows continents / deserts / ice instead of a single tint.
-local LOD_OCEAN = Config.BODY.lodColor or Color3.fromRGB(56, 102, 146)
-local LOD_GRASS = Color3.fromRGB(84, 138, 72)
-local LOD_SAND = Color3.fromRGB(206, 188, 138)
-local LOD_ROCK = Color3.fromRGB(120, 116, 110)
-local LOD_SNOW = Color3.fromRGB(232, 236, 240)
-function Planet.lodColorForUnit(ux: number, uy: number, uz: number): Color3
-	local _, material, isOcean = Planet.sample(ux, uy, uz)
-	if isOcean then
-		return LOD_OCEAN
-	elseif material == SNOW then
-		return LOD_SNOW
-	elseif material == SAND then
-		return LOD_SAND
-	elseif material == ROCK then
-		return LOD_ROCK
+-- The biome's "from orbit" ALBEDO for a unit direction -- a CONTINUOUS blend (not five
+-- hard buckets) so the distant planet reads as real continents: deep->shallow seas,
+-- sandy coasts, green/forest land graded to desert and snow, rocky/snow-capped mountains
+-- and polar ice. The from-space renderer bakes lighting (a terminator) onto this albedo.
+local LOD_DEEP = Color3.fromRGB(26, 60, 104) -- open ocean
+local LOD_SHALLOW = Color3.fromRGB(58, 122, 162) -- coastal shelf
+local LOD_BEACH = Color3.fromRGB(196, 184, 142) -- coastline
+local LOD_GRASS = Color3.fromRGB(80, 134, 70) -- temperate plains
+local LOD_FOREST = Color3.fromRGB(48, 100, 58) -- denser vegetation
+local LOD_SAND = Color3.fromRGB(208, 188, 138) -- desert
+local LOD_ROCK = Color3.fromRGB(122, 114, 104) -- bare mountain
+local LOD_SNOW = Color3.fromRGB(236, 240, 245) -- snow / ice
+
+-- Hermite smoothstep; e0 may be > e1 to invert (returns ~1 below e1).
+local function sstep(e0: number, e1: number, x: number): number
+	if e0 == e1 then
+		return x >= e1 and 1 or 0
 	end
-	return LOD_GRASS
+	local t = math.clamp((x - e0) / (e1 - e0), 0, 1)
+	return t * t * (3 - 2 * t)
+end
+
+function Planet.lodColorForUnit(ux: number, uy: number, uz: number): Color3
+	local x, y, z = ux * R, uy * R, uz * R
+	local elev = noise(x * B.elevFreq, y * B.elevFreq, z * B.elevFreq)
+	local temp = noise(x * B.tempFreq + 53.3, y * B.tempFreq + 17.1, z * B.tempFreq + 91.7)
+	local detail = fbm(x, y, z, 3, B.detailFreq)
+	local lat = math.abs(uy) -- 0 at equator .. 1 at the poles
+
+	if elev < B.oceanLevel then
+		-- Sea: shallow at the coast, deep offshore, frozen near the poles.
+		local depth = sstep(B.oceanLevel, -0.6, elev)
+		local c = LOD_SHALLOW:Lerp(LOD_DEEP, depth)
+		return c:Lerp(LOD_SNOW, sstep(0.82, 0.96, lat))
+	end
+
+	local land = (elev - B.oceanLevel) / (1 - B.oceanLevel) -- 0..1
+	local cold = sstep(B.coldLevel + 0.06, B.coldLevel - 0.10, temp) -- 1 cold .. 0 warm
+	-- Temperate base, mottled into forest by the fine detail field.
+	local c = LOD_GRASS:Lerp(LOD_FOREST, sstep(-0.4, 0.4, detail) * 0.7)
+	c = c:Lerp(LOD_SAND, sstep(B.hotLevel - 0.06, B.hotLevel + 0.10, temp)) -- hot -> desert
+	c = c:Lerp(LOD_SNOW, cold * 0.9) -- cold -> snow
+	-- Warm coastlines get a sandy beach band.
+	local beach = (1 - sstep(0.0, 0.05, land)) * (1 - cold)
+	c = c:Lerp(LOD_BEACH, beach * 0.8)
+	-- Mountains: bare rock, then snow-capped peaks.
+	c = c:Lerp(LOD_ROCK, sstep(B.mountainLevel - 0.04, B.mountainLevel + 0.06, land))
+	c = c:Lerp(LOD_SNOW, sstep(B.mountainLevel + 0.12, 0.95, land))
+	-- Polar ice caps.
+	return c:Lerp(LOD_SNOW, sstep(0.80, 0.95, lat))
 end
 
 -- The LOD sphere radius: just below the deepest crust (ocean sits at sea level, so

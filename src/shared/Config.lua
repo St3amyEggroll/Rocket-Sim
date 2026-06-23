@@ -141,6 +141,16 @@ Config.LOD = {
 	textureSize = 256, -- equirectangular image width (height = half); <= 1024
 	latBands = 28, -- tile shell: latitude rings (pole to pole)
 	lonBands = 72, -- tile shell: longitude tiles at the equator (fewer toward the poles)
+	-- From-space lighting. The starry space sky needs the sun DOWN (ClockTime night), which
+	-- would leave the planet flat and unlit -- so instead the shell is drawn Neon (self-lit)
+	-- with a day/night terminator BAKED in from a fixed sun direction. No per-frame cost; the
+	-- planet keeps a real sunlit limb + dark night side against the stars.
+	sunDir = Vector3.new(0.55, 0.5, -0.66), -- baked space-sun direction (lit side faces this)
+	nightShade = 0.16, -- night-side brightness (a touch of earthshine, not pure black)
+	termSoftness = 0.30, -- terminator band half-width (in dot-product units)
+	nightTint = Color3.fromRGB(16, 24, 42), -- cool tint blended into the shadowed side
+	oceanSpec = 0.55, -- ocean sun-glint (specular hotspot) strength
+	oceanSpecTight = 64, -- glint exponent (higher = tighter, sharper highlight)
 }
 
 Config.CRAFT = {

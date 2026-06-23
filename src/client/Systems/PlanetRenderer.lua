@@ -37,6 +37,15 @@ local PlanetRenderer = {}
 -- entirely by mesh.Scale = renderedDiameter / BASE.
 local BASE = 2048
 
+-- Hermite smoothstep, for the baked day/night terminator.
+local function smoothstep(e0, e1, x)
+	if e0 == e1 then
+		return x >= e1 and 1 or 0
+	end
+	local t = math.clamp((x - e0) / (e1 - e0), 0, 1)
+	return t * t * (3 - 2 * t)
+end
+
 -- A CFrame at `pos` whose UP axis is `up` (a tile tangent to the sphere faces outward).
 local function frameFromUp(pos, up)
 	up = (up.Magnitude > 1e-3) and up.Unit or Vector3.yAxis
@@ -52,6 +61,8 @@ function PlanetRenderer:Init()
 	self._trueRadius = Planet.lodRadius()
 	self._surfaceRadius = Config.BODY.radius
 	self._atmoRadius = Config.BODY.radius + Config.ATMOSPHERE.top
+	-- A second, larger atmosphere shell for a soft outer limb glow (the scattering halo).
+	self._glowRadius = self._atmoRadius * 1.08
 	-- Within maxRender the body is drawn at TRUE scale/position (mesh spheres have no
 	-- size cap), so the surface and low orbit are seamless and never occlude the craft.
 	-- Beyond it (high orbit / deep space, where pulling it in can't occlude anything)
@@ -84,9 +95,19 @@ function PlanetRenderer:Start()
 	self._origin = Registry:Get("FloatingOriginController")
 	self._input = Registry:Get("InputController")
 
-	self._ball, self._ballMesh = self:_makeSphere("Planet", Config.BODY.lodColor or Config.BODY.grassColor, Enum.Material.SmoothPlastic, 0)
-	-- Translucent atmosphere shell (purely cosmetic), drawn concentric with the body.
-	self._atmo, self._atmoMesh = self:_makeSphere("Atmosphere", Config.ATMOSPHERE.color, Enum.Material.ForceField, 0.5)
+	-- The body is drawn Neon (self-lit): the space sky keeps the sun down for stars, so the
+	-- planet can't be lit conventionally -- instead it shows its baked albedo + terminator
+	-- directly. A dark ocean-blue base sits under the biome shell as the smooth round limb.
+	self._ball, self._ballMesh = self:_makeSphere("Planet", Color3.fromRGB(20, 42, 70), Enum.Material.Neon, 0)
+	-- Two concentric ForceField shells (brightest at the silhouette) fake the atmospheric
+	-- scattering halo: an inner haze and a softer, larger outer glow.
+	self._atmo, self._atmoMesh = self:_makeSphere("Atmosphere", Config.ATMOSPHERE.color, Enum.Material.ForceField, 0.55)
+	self._glow, self._glowMesh = self:_makeSphere(
+		"AtmoGlow",
+		Config.ATMOSPHERE.color:Lerp(Color3.new(1, 1, 1), 0.3),
+		Enum.Material.ForceField,
+		0.85
+	)
 
 	-- Biome detail over the base (ocean) sphere, so you see continents from orbit. Prefer a
 	-- painted equirectangular texture; fall back to a tile shell if that isn't supported.
@@ -107,18 +128,28 @@ function PlanetRenderer:_apply(mesh, part, diameter, center)
 	part.CFrame = CFrame.new(center)
 end
 
--- Build the biome shell: a layer of land-colored tiles over the base (ocean) sphere, laid
--- at the LOD radius (just under the surface, so streamed terrain covers them up close).
--- Oceans are left to the base sphere, so only land cells become tiles.
+-- Build the biome shell: a full-sphere layer of Neon (self-lit) tiles over the dark base
+-- sphere, laid at the LOD radius (just under the surface, so streamed terrain covers them
+-- up close). Each tile's colour is the biome ALBEDO with the day/night terminator and an
+-- ocean sun-glint BAKED in for a fixed space-sun direction -- the planet keeps a lit limb
+-- and a dark night side against the stars, at zero per-frame cost.
 function PlanetRenderer:_buildBiomeShell()
 	local folder = Instance.new("Folder")
 	folder.Name = "BiomeShell"
 	self._shell = folder
 	self._shellVisible = false
 
+	local L = Config.LOD
+	local sun = (L.sunDir and L.sunDir.Magnitude > 1e-3) and L.sunDir.Unit or Vector3.new(0.55, 0.5, -0.66).Unit
+	local night = L.nightShade or 0.16
+	local soft = L.termSoftness or 0.30
+	local tint = L.nightTint or Color3.fromRGB(16, 24, 42)
+	local oceanSpec = L.oceanSpec or 0.55
+	local specTight = L.oceanSpecTight or 64
+
 	local R = self._trueRadius
-	local Nlat = Config.LOD.latBands
-	local lonBands = Config.LOD.lonBands
+	local Nlat = L.latBands
+	local lonBands = L.lonBands
 	local cellH = (math.pi * R) / Nlat
 	for i = 0, Nlat - 1 do
 		local lat = -math.pi / 2 + (i + 0.5) * (math.pi / Nlat)
@@ -128,20 +159,32 @@ function PlanetRenderer:_buildBiomeShell()
 		for j = 0, Nlon - 1 do
 			local lon = (j + 0.5) * (2 * math.pi / Nlon)
 			local dx, dy, dz = cl * math.cos(lon), sl, cl * math.sin(lon)
-			if not Planet.isOceanUnit(dx, dy, dz) then
-				local dir = Vector3.new(dx, dy, dz)
-				local tile = Instance.new("Part")
-				tile.Anchored = true
-				tile.CanCollide = false
-				tile.CanQuery = false
-				tile.CanTouch = false
-				tile.CastShadow = false
-				tile.Size = Vector3.new(cellW * 1.5 + 6, 2, cellH * 1.5 + 6)
-				tile.Color = Planet.lodColorForUnit(dx, dy, dz)
-				tile.Material = Enum.Material.SmoothPlastic
-				tile.CFrame = frameFromUp(dir * (R + 3), dir)
-				tile.Parent = folder
+			local dir = Vector3.new(dx, dy, dz)
+			local albedo = Planet.lodColorForUnit(dx, dy, dz)
+
+			-- Baked terminator: brightness from the sun-facing dot, softened across the
+			-- day/night line, with a cool tint over the shadowed hemisphere.
+			local dd = dir:Dot(sun)
+			local lit = smoothstep(-soft, soft, dd)
+			local b = night + (1 - night) * lit
+			local c = Color3.new(albedo.R * b, albedo.G * b, albedo.B * b):Lerp(tint, (1 - lit) * 0.5)
+			-- Ocean sun-glint: a tight specular hotspot near the sub-solar point.
+			if dd > 0 and Planet.isOceanUnit(dx, dy, dz) then
+				local s = (dd ^ specTight) * oceanSpec * lit
+				c = Color3.new(math.min(c.R + s * 0.9, 1), math.min(c.G + s * 0.95, 1), math.min(c.B + s, 1))
 			end
+
+			local tile = Instance.new("Part")
+			tile.Anchored = true
+			tile.CanCollide = false
+			tile.CanQuery = false
+			tile.CanTouch = false
+			tile.CastShadow = false
+			tile.Size = Vector3.new(cellW * 1.7 + 6, 2, cellH * 1.7 + 6)
+			tile.Color = c
+			tile.Material = Enum.Material.Neon
+			tile.CFrame = frameFromUp(dir * (R + 3), dir)
+			tile.Parent = folder
 		end
 	end
 end
@@ -206,12 +249,14 @@ function PlanetRenderer:_update()
 		if self._ball.Transparency ~= 1 then
 			self._ball.Transparency = 1
 			self._atmo.Transparency = 1
+			self._glow.Transparency = 1
 		end
 		self:_setShell(false)
 		return
 	elseif self._ball.Transparency ~= 0 then
 		self._ball.Transparency = 0
-		self._atmo.Transparency = 0.5
+		self._atmo.Transparency = 0.55
+		self._glow.Transparency = 0.85
 	end
 
 	local center = self._origin:ToRender(Orbit.vec(0, 0, 0))
@@ -238,6 +283,9 @@ function PlanetRenderer:_update()
 	self:_apply(self._ballMesh, self._ball, self._trueRadius * 2 * scale, renderCenter)
 	if self._atmo then
 		self:_apply(self._atmoMesh, self._atmo, self._atmoRadius * 2 * scale, renderCenter)
+	end
+	if self._glow then
+		self:_apply(self._glowMesh, self._glow, self._glowRadius * 2 * scale, renderCenter)
 	end
 end
 
