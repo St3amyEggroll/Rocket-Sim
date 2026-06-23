@@ -66,7 +66,8 @@ function CameraController:_update(state, info)
 	if info and info.mode == "VAB" then
 		local base = self._origin:ToRender(self._flight:GetLaunchPosition())
 		local h = self._vehicle:GetHeight()
-		local target = base + Vector3.new(0, math.max(h * 0.5, 6), 0)
+		-- Frame the actual parts (so a free-floating anchor stays in view), not just the pad.
+		local target = base + self._vehicle:GetBuildCenter()
 		local cosE = math.cos(orbit.elevation)
 		local dir = Vector3.new(
 			math.cos(orbit.azimuth) * cosE,

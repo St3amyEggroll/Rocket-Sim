@@ -3,10 +3,19 @@
 	Owner of: the active craft design AND its flight-time runtime (current stage,
 	remaining fuel). Single source of truth for "what the rocket is".
 
-	The design is an array of part definitions, BOTTOM -> TOP. The VAB edits it
-	(AddPart/RemovePart/Clear); the flight loop reads thrust/mass and burns fuel.
-	Fires Changed whenever the active parts change (edit, stage, reset) so the
-	renderer rebuilds and the VAB UI refreshes.
+	KSP-style 3D assembly: the design is a SET OF PARTS placed in 3D build space, each
+	with an id, its definition, a build-local CFrame, and the index of the part it is
+	attached to (parent; nil for the root). Build space has +Y up (the nose direction)
+	and its origin at the launch-pad point; parts may float freely.
+
+	Flight still runs on the proven ALONG-AXIS model: every scalar the simulation needs
+	(mass, centre of mass, centre of pressure, moment of inertia, length, staging) is
+	measured up the +Y body axis from the parts' positions, and GetFlightOffset re-centres
+	the assembly (base on the pad, CoM on the thrust axis) for the renderer. Radial X/Z
+	offsets are carried for the renderer + a later full-radial-flight pass.
+
+	The VAB edits the set (AddPartAt/MovePart/RemovePart/Clear); the flight loop reads
+	thrust/mass and burns fuel. Fires Changed whenever the active parts change.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -25,11 +34,17 @@ function VehicleController:Init()
 	self.Changed = Signal.new()
 	self.Staged = Signal.new() -- fires (droppedStageNumber) just before Changed on a stage
 
-	self._design = {}
+	-- Default rocket: stack the default design vertically (bottom -> top) in build space.
+	self._parts = {}
+	local y = 0
+	local prev = nil
 	for _, id in ipairs(Config.LAUNCH.defaultDesign) do
 		local def = Catalog.get(id)
 		if def then
-			table.insert(self._design, def)
+			local h = def.height or 0
+			table.insert(self._parts, { id = id, def = def, cf = CFrame.new(0, y + h * 0.5, 0), parent = prev })
+			prev = #self._parts
+			y += h
 		end
 	end
 
@@ -38,46 +53,92 @@ function VehicleController:Init()
 	self:_recompute()
 end
 
+-- Bottom of a part along the build axis (used to order the stack for staging).
+function VehicleController:_partBottom(part)
+	return part.cf.Y - (part.def.height or 0) * 0.5
+end
+
 function VehicleController:_recompute()
-	self._stats = CraftStats.analyze(self._design, self._surfaceGravity)
+	-- Order the parts bottom -> top by build height; the serial staging model reads them
+	-- in that order (stable: ties keep insertion order).
+	local order = {}
+	for i = 1, #self._parts do
+		order[i] = i
+	end
+	table.sort(order, function(a, b)
+		local ba, bb = self:_partBottom(self._parts[a]), self:_partBottom(self._parts[b])
+		if ba == bb then
+			return a < b
+		end
+		return ba < bb
+	end)
+	self._order = order
+
+	local defs = {}
+	for pos, i in ipairs(order) do
+		defs[pos] = self._parts[i].def
+	end
+	self._stats = CraftStats.analyze(defs, self._surfaceGravity)
+
+	-- Map stage (keyed by ordered position) back to each part's index.
+	self._stageOf = {}
+	for pos, i in ipairs(order) do
+		self._stageOf[i] = self._stats.stageOfPart[pos] or 0
+	end
+
 	self:ResetRuntime()
 end
 
 -- ---- Design editing (VAB) ----
 
-function VehicleController:AddPart(id)
-	local def = Catalog.get(id)
-	if def then
-		table.insert(self._design, def) -- append = add on top of the stack
-		self:_recompute()
-	end
-end
-
--- Insert a part at a stack position (1 = bottom). Used by drag-and-drop assembly.
-function VehicleController:InsertPart(index, id)
+-- Place a part at a build-local CFrame, attached to `parent` (a part index or nil for
+-- the root). Returns the new part's index.
+function VehicleController:AddPartAt(id, cf, parent)
 	local def = Catalog.get(id)
 	if not def then
+		return nil
+	end
+	table.insert(self._parts, { id = id, def = def, cf = cf, parent = parent })
+	self:_recompute()
+	return #self._parts
+end
+
+-- Move an existing part to a new CFrame (and optionally re-parent it).
+function VehicleController:MovePart(index, cf, parent)
+	local p = self._parts[index]
+	if not p then
 		return
 	end
-	index = math.clamp(index, 1, #self._design + 1)
-	table.insert(self._design, index, def)
+	p.cf = cf
+	if parent ~= nil then
+		p.parent = (parent ~= false) and parent or nil
+	end
 	self:_recompute()
 end
 
 function VehicleController:RemovePart(index)
-	if self._design[index] then
-		table.remove(self._design, index)
-		self:_recompute()
+	if not self._parts[index] then
+		return
 	end
-end
-
-function VehicleController:Clear()
-	self._design = {}
+	table.remove(self._parts, index)
+	-- Repair parent links: orphan the removed part's children, shift higher indices down.
+	for _, p in ipairs(self._parts) do
+		if p.parent == index then
+			p.parent = nil
+		elseif p.parent and p.parent > index then
+			p.parent -= 1
+		end
+	end
 	self:_recompute()
 end
 
-function VehicleController:GetDesign()
-	return self._design
+function VehicleController:Clear()
+	self._parts = {}
+	self:_recompute()
+end
+
+function VehicleController:GetParts()
+	return self._parts
 end
 
 function VehicleController:GetStats()
@@ -92,28 +153,31 @@ function VehicleController:ResetRuntime()
 	self.Changed:Fire()
 end
 
--- Active (not-yet-jettisoned) parts, bottom -> top.
+-- True if a part (by index) is still attached (not yet jettisoned).
+function VehicleController:_isActive(i)
+	local st = self._stageOf[i] or 0
+	return st == 0 or st >= self._stageIndex
+end
+
+-- Active (not-yet-jettisoned) part definitions, bottom -> top.
 function VehicleController:GetActiveParts()
 	local out = {}
-	local stageOf = self._stats.stageOfPart
-	for i, def in ipairs(self._design) do
-		local st = stageOf[i] or 0
-		if st == 0 or st >= self._stageIndex then
-			out[#out + 1] = def
+	for _, i in ipairs(self._order) do
+		if self:_isActive(i) then
+			out[#out + 1] = self._parts[i].def
 		end
 	end
 	return out
 end
 
--- Same as GetActiveParts but each entry carries its stage number (0 = payload),
--- so the renderer can tag parts and split off a whole stage when it is jettisoned.
+-- Active parts with their stage number (0 = payload), design index, and build CFrame,
+-- bottom -> top -- so the renderer can place each part in 3D and split off a stage.
 function VehicleController:GetActiveLayout()
 	local out = {}
-	local stageOf = self._stats.stageOfPart
-	for i, def in ipairs(self._design) do
-		local st = stageOf[i] or 0
-		if st == 0 or st >= self._stageIndex then
-			out[#out + 1] = { def = def, stage = st, index = i }
+	for _, i in ipairs(self._order) do
+		if self:_isActive(i) then
+			local part = self._parts[i]
+			out[#out + 1] = { def = part.def, stage = self._stageOf[i] or 0, index = i, cf = part.cf }
 		end
 	end
 	return out
@@ -158,28 +222,23 @@ function VehicleController:CanStage(): boolean
 	return self._stageIndex <= self._stats.stageCount
 end
 
--- Fire the current stage. Returns the total HEIGHT of the jettisoned parts (so the
--- flight loop can shift the craft up by that much, keeping the upper stage in place
--- while the spent stage drops away). Returns 0 if there was nothing to stage.
+-- Fire the current stage. Returns the HEIGHT the craft base rises by once the spent
+-- parts drop (so the flight loop can shift the upper stage up and keep it in place).
 function VehicleController:Stage(): number
 	local s = self._stats
 	if self._stageIndex > s.stageCount then
 		return 0
 	end
 	local dropped = self._stageIndex
-
-	local droppedHeight = 0
-	for i, def in ipairs(self._design) do
-		if (s.stageOfPart[i] or 0) == dropped then
-			droppedHeight += def.height or 0
-		end
-	end
+	local oldBase = self:GetRotProfile().base or 0
 
 	self._stageIndex += 1
 	self._fuelRemaining = (self._stageIndex <= s.stageCount) and s.stages[self._stageIndex].fuel or 0
+
+	local newBase = self:GetRotProfile().base or oldBase
 	self.Staged:Fire(dropped) -- renderer splits off the spent stage (uses the live model)
 	self.Changed:Fire() -- ...then everything rebuilds for the new active craft
-	return droppedHeight
+	return math.max(0, newBase - oldBase)
 end
 
 function VehicleController:GetFuelFraction(): number
@@ -205,12 +264,9 @@ function VehicleController:GetCurrentStageDV(): number
 	return st.ve * math.log(m / mf)
 end
 
+-- Along-axis length of the active stack (base -> top), used by camera + touchdown.
 function VehicleController:GetHeight(): number
-	local h = 0
-	for _, def in ipairs(self:GetActiveParts()) do
-		h += def.height
-	end
-	return h
+	return self:GetRotProfile().length
 end
 
 -- Summed aerodynamic drag area of the active parts (used by the atmosphere model).
@@ -222,47 +278,84 @@ function VehicleController:GetDragArea(): number
 	return a
 end
 
--- Rotational profile of the active stack, measured along the body axis from the
--- base (+y = toward the nose). Used for rigid-body attitude + aero stability:
---   com     = centre of mass (y)
---   cop     = centre of pressure (drag-weighted y)
---   inertia = pitch/yaw moment of inertia about the CoM (sum m * (y-com)^2)
+-- Rotational profile of the active stack, measured along the body axis (+Y = nose):
+--   com     = centre of mass, as a HEIGHT above the base
+--   cop     = centre of pressure (drag-weighted), height above base
+--   inertia = pitch/yaw moment of inertia about the CoM
 --   margin  = com - cop  (>0 = aerodynamically STABLE; CoP behind CoM)
--- Masses use the wet part masses (a fixed, representative distribution); the slow
--- CoM drift as fuel burns is not modelled yet.
+--   length  = base -> top extent
+--   base    = build-space Y of the lowest point (for GetFlightOffset / staging)
+--   comX/comZ = build-space lateral CoM (so the renderer can put the thrust axis on it)
+-- Masses use the wet part masses (a fixed, representative distribution).
 function VehicleController:GetRotProfile()
-	local y = 0
-	local totalM, sumMY, sumDrag, sumDragY = 0, 0, 0, 0
 	local items = {}
-	for _, def in ipairs(self:GetActiveParts()) do
-		local cy = y + (def.height or 0) * 0.5
+	local totalM, sumMY, sumMX, sumMZ = 0, 0, 0, 0
+	local sumDrag, sumDragY = 0, 0
+	local minB, maxT = math.huge, -math.huge
+	for _, e in ipairs(self:GetActiveLayout()) do
+		local def = e.def
+		local cy = e.cf.Y
+		local h = def.height or 0
 		local m = (def.mass or 0) + (def.fuel or 0)
 		local drag = def.drag or 0
 		items[#items + 1] = { y = cy, m = m }
 		totalM += m
 		sumMY += m * cy
+		sumMX += m * e.cf.X
+		sumMZ += m * e.cf.Z
 		sumDrag += drag
 		sumDragY += drag * cy
-		y += def.height or 0
+		minB = math.min(minB, cy - h * 0.5)
+		maxT = math.max(maxT, cy + h * 0.5)
 	end
 
-	local com = (totalM > 0) and (sumMY / totalM) or 0
-	local cop = (sumDrag > 0) and (sumDragY / sumDrag) or com
+	if totalM <= 0 or minB == math.huge then
+		return { com = 0, cop = 0, inertia = 1, margin = 0, length = 0, mass = 0, base = 0, comX = 0, comZ = 0 }
+	end
+
+	local base = minB
+	local comY = sumMY / totalM
+	local copY = (sumDrag > 0) and (sumDragY / sumDrag) or comY
 	local inertia = 0
 	for _, it in ipairs(items) do
-		local d = it.y - com
+		local d = it.y - comY
 		inertia += it.m * d * d
 	end
 	inertia = math.max(inertia, math.max(totalM, 1) * 1.5) -- floor so single parts aren't twitchy
 
 	return {
-		com = com,
-		cop = cop,
+		com = comY - base,
+		cop = copY - base,
 		inertia = inertia,
-		margin = com - cop,
-		length = y,
+		margin = comY - copY,
+		length = maxT - base,
 		mass = totalM,
+		base = base,
+		comX = sumMX / totalM,
+		comZ = sumMZ / totalM,
 	}
+end
+
+-- Build-local point that should map to the flight base (CoM on the thrust axis, lowest
+-- point on the pad). The renderer pivots the model so this point sits at state.position.
+function VehicleController:GetFlightOffset(): Vector3
+	local prof = self:GetRotProfile()
+	return Vector3.new(prof.comX or 0, prof.base or 0, prof.comZ or 0)
+end
+
+-- Centre of the parts' bounding box in build space (for framing the VAB camera).
+function VehicleController:GetBuildCenter(): Vector3
+	if #self._parts == 0 then
+		return Vector3.zero
+	end
+	local mn = Vector3.new(math.huge, math.huge, math.huge)
+	local mx = Vector3.new(-math.huge, -math.huge, -math.huge)
+	for _, p in ipairs(self._parts) do
+		local pos = p.cf.Position
+		mn = Vector3.new(math.min(mn.X, pos.X), math.min(mn.Y, pos.Y), math.min(mn.Z, pos.Z))
+		mx = Vector3.new(math.max(mx.X, pos.X), math.max(mx.Y, pos.Y), math.max(mx.Z, pos.Z))
+	end
+	return (mn + mx) * 0.5
 end
 
 function VehicleController:GetTelemetry(throttle)

@@ -32,13 +32,15 @@ local function makePart(parent, name, props)
 	return p
 end
 
-local function addCylinder(model, name, height, radius, color, material, y)
+local function addCylinder(model, name, height, radius, color, material, cf)
 	return makePart(model, name, {
 		Shape = Enum.PartType.Cylinder,
 		Size = Vector3.new(height, radius * 2, radius * 2),
 		Color = color,
+		-- A Roblox cylinder's length is its local X; rotate 90 deg about Z so the length
+		-- runs along the part's local Y (the build axis), then place it at the part CFrame.
+		CFrame = cf * CFrame.Angles(0, 0, math.rad(90)),
 		Material = material,
-		CFrame = CFrame.new(0, y, 0) * CFrame.Angles(0, 0, math.rad(90)),
 	})
 end
 
@@ -149,12 +151,12 @@ function CraftRenderer:_buildPad()
 	})
 end
 
-function CraftRenderer:_buildFins(model, y, radius, stage, index)
+function CraftRenderer:_buildFins(model, centerPos, radius, stage, index)
 	local count, span, finH, thick = 4, 3.4, 4.2, 0.4
 	for i = 1, count do
 		local ang = (i - 1) * (2 * math.pi / count)
 		local dir = Vector3.new(math.cos(ang), 0, math.sin(ang))
-		local pos = dir * (radius + span * 0.5 - 0.6) + Vector3.new(0, y, 0)
+		local pos = dir * (radius + span * 0.5 - 0.6) + centerPos
 		local blade = makePart(model, "Fin" .. i, {
 			Shape = Enum.PartType.Block,
 			-- X = radial span, Y = vertical, Z = thickness (tangential).
@@ -177,12 +179,14 @@ function CraftRenderer:_rebuildCraft()
 
 	local model = Instance.new("Model")
 	model.Name = "Craft"
+	-- Root (the model pivot) sits at the build-space origin; parts are placed at their
+	-- build-local CFrames. _render maps the assembly onto the pad (VAB) or the craft
+	-- position with the base/CoM on the thrust axis (flight).
 	local root = makePart(model, "Root", { Size = Vector3.new(0.2, 0.2, 0.2), Transparency = 1, CFrame = CFrame.new(0, 0, 0) })
 	model.PrimaryPart = root
 
-	local y = 0
 	local bottomRadius = 3
-	local bottomSet = false
+	local bottomY = math.huge
 	-- Tag each part with its stage AND design index, and make it queryable so the VAB
 	-- can raycast-select it in 3D.
 	local function tag(part, stage, index)
@@ -192,31 +196,38 @@ function CraftRenderer:_rebuildCraft()
 		return part
 	end
 	for _, entry in ipairs(layout) do
-		local def, stage, index = entry.def, entry.stage, entry.index
+		local def, stage, index, cf = entry.def, entry.stage, entry.index, entry.cf
 		if def.shape == "fins" then
-			self:_buildFins(model, y, bottomSet and bottomRadius or def.radius, stage, index)
+			self:_buildFins(model, cf.Position, def.radius, stage, index)
 		else
-			if not bottomSet then
-				bottomRadius = def.radius
-				bottomSet = true
-			end
 			local mat = (def.category == "engine") and Enum.Material.Metal or Enum.Material.SmoothPlastic
-			local center = y + def.height / 2
-			tag(addCylinder(model, def.name, def.height, def.radius, def.color, mat, center), stage, index)
+			tag(addCylinder(model, def.name, def.height, def.radius, def.color, mat, cf), stage, index)
+			local b = cf.Y - def.height * 0.5
+			if b < bottomY then
+				bottomY = b
+				bottomRadius = def.radius
+			end
 			if def.shape == "pod" then
 				tag(makePart(model, "Dome", {
 					Shape = Enum.PartType.Ball,
 					Size = Vector3.new(def.radius * 1.8, def.radius * 1.4, def.radius * 1.8),
 					Color = def.color,
 					Material = Enum.Material.SmoothPlastic,
-					CFrame = CFrame.new(0, y + def.height, 0),
+					CFrame = cf * CFrame.new(0, def.height * 0.5, 0),
 				}), stage, index)
 			elseif def.shape == "engine" then
-				tag(addCylinder(model, "Nozzle", def.height * 0.5, def.radius * 0.66, Color3.fromRGB(40, 42, 48), Enum.Material.Metal, y - def.height * 0.1), stage, index)
+				tag(addCylinder(model, "Nozzle", def.height * 0.5, def.radius * 0.66, Color3.fromRGB(40, 42, 48), Enum.Material.Metal, cf * CFrame.new(0, -def.height * 0.6, 0)), stage, index)
 			end
-			y += def.height
 		end
 	end
+	if bottomY == math.huge then
+		bottomY = 0
+	end
+
+	-- Flame + reentry glow ride the thrust axis (lateral CoM) at the base.
+	local off = self._vehicle:GetFlightOffset()
+	local prof = self._vehicle:GetRotProfile()
+	local axisX, axisZ = off.X, off.Z
 
 	local flame = makePart(model, "Flame", {
 		Shape = Enum.PartType.Ball,
@@ -224,7 +235,7 @@ function CraftRenderer:_rebuildCraft()
 		Color = Color3.fromRGB(255, 150, 45),
 		Material = Enum.Material.Neon,
 		Transparency = 1,
-		CFrame = CFrame.new(0, -6, 0),
+		CFrame = CFrame.new(axisX, bottomY - 6, axisZ),
 	})
 	local light = Instance.new("PointLight")
 	light.Color = Color3.fromRGB(255, 160, 70)
@@ -235,14 +246,14 @@ function CraftRenderer:_rebuildCraft()
 
 	-- Reentry plasma envelope: a neon shell wrapping the craft, hidden until the
 	-- flight loop reports reentry heating (then it glows orange -> white-hot).
-	local glowH = math.max(y, 6)
+	local glowH = math.max(prof.length, 6)
 	local glow = makePart(model, "Reentry", {
 		Shape = Enum.PartType.Ball,
 		Size = Vector3.new(bottomRadius * 3.4, glowH * 1.25, bottomRadius * 3.4),
 		Color = Color3.fromRGB(255, 140, 50),
 		Material = Enum.Material.Neon,
 		Transparency = 1,
-		CFrame = CFrame.new(0, glowH * 0.4, 0),
+		CFrame = CFrame.new(axisX, bottomY + glowH * 0.4, axisZ),
 	})
 
 	model.Parent = Workspace
@@ -315,7 +326,15 @@ function CraftRenderer:_render(state, info)
 
 	local pd = info and info.pointDir or Orbit.vec(0, 1, 0)
 	local up = Vector3.new(pd.x or pd.X, pd.y or pd.Y, pd.z or pd.Z)
-	self._craft:PivotTo(pointCFrame(craftRender, up))
+	if info and info.mode == "VAB" then
+		-- VAB: parts at their raw build positions on the pad (+Y up), so a free-floating
+		-- anchor stays exactly where it was dropped while building.
+		self._craft:PivotTo(CFrame.new(craftRender))
+	else
+		-- Flight: map the assembly's base (CoM on the thrust axis) onto the craft position.
+		local off = self._vehicle:GetFlightOffset()
+		self._craft:PivotTo(pointCFrame(craftRender, up) * CFrame.new(-off))
+	end
 
 	local throttle = (info and info.throttle) or 0
 	if info and info.powered and throttle > 0 then

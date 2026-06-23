@@ -1,13 +1,17 @@
 --[[
 	VABController
-	Owner of: the Vehicle Assembly Building UI + the 3D in-world build interaction.
+	Owner of: the Vehicle Assembly Building UI + the 3D, KSP-style build interaction.
 
-	KSP-style: the parts live in a UI panel (LEFT), but you GRAB a part and it becomes
-	a real 3D ghost in the world that snaps onto the actual rocket's attach nodes;
-	click to place it. The first part is the anchor and the rest stack onto it. Click
-	a placed part to select it; its stats show on the RIGHT.
+	Building is real 3D, drag-and-drop:
+	  * Press-and-hold a part in the LEFT palette -> it becomes a 3D ghost on your cursor.
+	  * Move it in the world; near a part's top/bottom it STACK-snaps, near a side it
+	    SURFACE-snaps (radial). Away from the rocket it just floats on a build plane.
+	  * Release to drop it -- snapped onto the rocket, or free-floating off it (the first
+	    part you drop is the anchor; drop it anywhere in 3D).
+	  * Press-and-hold an already-placed part to pick it back up and move it.
+	  * Release over the parts list to delete the held part. Esc cancels a move.
 
-	UI is for choosing parts + data only; the building itself happens on the 3D rocket
+	The UI is only for choosing parts + showing stats; assembly happens on the 3D rocket
 	(rendered by CraftRenderer, framed by the VAB orbit camera in CameraController).
 ]]
 
@@ -72,9 +76,9 @@ function VABController:Init()
 	self._partCards = {}
 	self._tabBtns = {}
 	self._activeCat = CATS[1].id
-	self._selected = nil
-	self._placing = nil
-	self._snapIndex = nil
+	self._selected = nil -- part index of the last placed/inspected part
+	self._drag = nil -- { id, def, ghost, pod, originalCF, originalParent }
+	self._snap = nil -- { cf, parent } the ghost will commit to on release
 end
 
 function VABController:Start()
@@ -94,16 +98,21 @@ function VABController:Start()
 		local vab = (m == "VAB")
 		self._gui.Enabled = vab
 		if not vab then
-			self:_endPlacing()
+			self:_cancelDrag(false)
 		end
 	end)
 	self._gui.Enabled = (self._mode:GetMode() == "VAB")
 
 	UserInputService.InputBegan:Connect(function(input, gameProcessed)
-		self:_onInput(input, gameProcessed)
+		self:_onInputBegan(input, gameProcessed)
+	end)
+	UserInputService.InputEnded:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 and self._drag then
+			self:_onRelease()
+		end
 	end)
 	RunService:BindToRenderStep("RocketSim_VAB", Enum.RenderPriority.Camera.Value + 1, function()
-		if self._placing then
+		if self._drag then
 			self:_updateGhost()
 		end
 	end)
@@ -140,7 +149,8 @@ function VABController:_build(parentGui)
 end
 
 function VABController:_buildPalette(gui)
-	local pane = panel(gui, UDim2.fromOffset(16, 56), UDim2.fromOffset(248, 470), "PARTS  (click to grab)")
+	local pane = panel(gui, UDim2.fromOffset(16, 56), UDim2.fromOffset(248, 470), "PARTS  (hold + drag)")
+	self._palettePane = pane
 
 	local tabs = Instance.new("Frame")
 	tabs.Position = UDim2.fromOffset(12, 38)
@@ -240,11 +250,12 @@ function VABController:_addPartCard(def, id)
 	hint.TextSize = 11
 	hint.TextXAlignment = Enum.TextXAlignment.Left
 	hint.TextColor3 = DIM
-	hint.Text = "click, then place on rocket"
+	hint.Text = "hold + drag into the world"
 	hint.Parent = b
 
-	b.Activated:Connect(function()
-		self:_grab(id)
+	-- Press (not click) begins dragging a new part; release in the world drops it.
+	b.MouseButton1Down:Connect(function()
+		self:_beginDragNew(id)
 	end)
 	table.insert(self._partCards, b)
 end
@@ -345,12 +356,12 @@ function VABController:_buildControls(gui)
 	local hint = Instance.new("TextLabel")
 	hint.AnchorPoint = Vector2.new(0.5, 1)
 	hint.Position = UDim2.new(0.5, 0, 1, -72)
-	hint.Size = UDim2.fromOffset(720, 20)
+	hint.Size = UDim2.fromOffset(900, 20)
 	hint.BackgroundTransparency = 1
 	hint.Font = Enum.Font.Code
 	hint.TextSize = 13
 	hint.TextColor3 = DIM
-	hint.Text = "Click a part, move onto the rocket, click to place  •  click a part to inspect  •  Esc cancels  •  RMB orbit / wheel zoom"
+	hint.Text = "Hold + drag a part onto the rocket (or anywhere to float)  •  drag a placed part to move it  •  drop on the parts list to delete  •  Esc cancels  •  RMB orbit / wheel zoom"
 	hint.Parent = gui
 end
 
@@ -367,22 +378,25 @@ function VABController:_makeNodeIndicator()
 	n.CastShadow = false
 	n.Material = Enum.Material.Neon
 	n.Color = ACCENT
-	n.Size = Vector3.new(2, 2, 2)
+	n.Size = Vector3.new(2.4, 2.4, 2.4)
 	n.Transparency = 1
 	n.Parent = Workspace
 	self._node = n
 end
 
-function VABController:_buildBase()
+-- Build space: origin at the launch-pad point, +Y up. The VAB renders the craft at this
+-- origin (CraftRenderer), so build-local CFrames map to the world by a pure translation.
+function VABController:_buildOrigin()
 	return self._origin:ToRender(self._flight:GetLaunchPosition())
 end
+function VABController:_buildToWorld(cf)
+	return CFrame.new(self:_buildOrigin()) * cf
+end
+function VABController:_worldToBuild(worldCF)
+	return CFrame.new(self:_buildOrigin()):Inverse() * worldCF
+end
 
-function VABController:_grab(id)
-	self:_endPlacing()
-	local def = Catalog.get(id)
-	if not def then
-		return
-	end
+function VABController:_makeGhost(def)
 	local ghost = Instance.new("Part")
 	ghost.Name = "VABGhost"
 	ghost.Anchored = true
@@ -393,101 +407,184 @@ function VABController:_grab(id)
 	ghost.Material = Enum.Material.ForceField
 	ghost.Color = def.color
 	ghost.Transparency = 0.35
-	local gh
 	if def.shape == "pod" then
 		ghost.Shape = Enum.PartType.Ball
 		ghost.Size = Vector3.new(def.radius * 1.9, def.radius * 1.5, def.radius * 1.9)
-		gh = def.radius * 1.5
 	else
 		ghost.Shape = Enum.PartType.Cylinder
-		gh = math.max(def.height or 0, 1.6)
+		local gh = math.max(def.height or 0, 1.2)
 		ghost.Size = Vector3.new(gh, def.radius * 2, def.radius * 2)
 	end
 	ghost.Parent = Workspace
-	self._placing = { id = id, def = def, ghost = ghost, gh = gh, pod = (def.shape == "pod") }
-	self._snapIndex = nil
+	return ghost
 end
 
-function VABController:_endPlacing()
-	if self._placing then
-		self._placing.ghost:Destroy()
-		self._placing = nil
+function VABController:_beginDragNew(id)
+	local def = Catalog.get(id)
+	if not def then
+		return
 	end
-	self._snapIndex = nil
+	self:_cancelDrag(false)
+	self._drag = { id = id, def = def, ghost = self:_makeGhost(def), pod = (def.shape == "pod") }
+	self._selected = nil
+	self:_updatePartPanel()
+end
+
+function VABController:_beginDragExisting(index)
+	local part = self._vehicle:GetParts()[index]
+	if not part then
+		return
+	end
+	self:_cancelDrag(false)
+	self._drag = {
+		id = part.id,
+		def = part.def,
+		ghost = self:_makeGhost(part.def),
+		pod = (part.def.shape == "pod"),
+		originalCF = part.cf,
+		originalParent = part.parent,
+	}
+	self._selected = nil
+	self._vehicle:RemovePart(index) -- lift it off; rebuilds the live model without it
+	self:_updatePartPanel()
+end
+
+-- Cancel the active drag. restore = re-add the picked-up part where it was.
+function VABController:_cancelDrag(restore)
+	local d = self._drag
+	if not d then
+		return
+	end
+	if d.ghost then
+		d.ghost:Destroy()
+	end
+	self._drag = nil
+	self._snap = nil
 	if self._node then
+		self._node.Transparency = 1
+	end
+	if restore and d.originalCF then
+		self._selected = self._vehicle:AddPartAt(d.id, d.originalCF, d.originalParent)
+	end
+	self:_updatePartPanel()
+end
+
+-- Release: drop the held part. Over the parts list -> discard/delete; otherwise commit
+-- it at the current snap (on the rocket) or free-floating position.
+function VABController:_onRelease()
+	local d = self._drag
+	if not d then
+		return
+	end
+	if self:_cursorOverPalette() then
+		self:_cancelDrag(false) -- dropped on the list: discard (deletes a picked-up part)
+		return
+	end
+	local snap = self._snap
+	local cf = snap and snap.cf or self:_freePlane()
+	local parent = snap and snap.parent or nil
+	d.ghost:Destroy()
+	self._drag = nil
+	self._snap = nil
+	if self._node then
+		self._node.Transparency = 1
+	end
+	self._selected = self._vehicle:AddPartAt(d.id, cf, parent)
+	self:_updatePartPanel()
+end
+
+function VABController:_cursorOverPalette()
+	local pane = self._palettePane
+	if not pane then
+		return false
+	end
+	local m = UserInputService:GetMouseLocation()
+	local p, s = pane.AbsolutePosition, pane.AbsoluteSize
+	return m.X >= p.X and m.X <= p.X + s.X and m.Y >= p.Y and m.Y <= p.Y + s.Y
+end
+
+-- Free placement on a camera-facing plane through the build origin (so you can drop a
+-- part anywhere on screen in 3D, off the rocket).
+function VABController:_freePlane()
+	local cam = Workspace.CurrentCamera
+	local m = UserInputService:GetMouseLocation()
+	local ray = cam:ViewportPointToRay(m.X, m.Y)
+	local O = self:_buildOrigin()
+	local nrm = cam.CFrame.LookVector
+	local denom = ray.Direction:Dot(nrm)
+	local t = (math.abs(denom) > 1e-4) and ((O - ray.Origin):Dot(nrm) / denom) or (O - ray.Origin).Magnitude
+	local pt = ray.Origin + ray.Direction * t
+	return self:_worldToBuild(CFrame.new(pt))
+end
+
+-- Compute where the ghost should sit: snap to a hit part's cap (stack) or side (surface),
+-- else free placement. Returns (buildCF, parentIndex|nil, nodeWorldPos|nil).
+function VABController:_snapTarget()
+	local cam = Workspace.CurrentCamera
+	local d = self._drag
+	local m = UserInputService:GetMouseLocation()
+	local ray = cam:ViewportPointToRay(m.X, m.Y)
+
+	local craft = Workspace:FindFirstChild("Craft")
+	if craft then
+		local params = RaycastParams.new()
+		params.FilterType = Enum.RaycastFilterType.Include
+		params.FilterDescendantsInstances = { craft }
+		local hit = Workspace:Raycast(ray.Origin, ray.Direction * 8000, params)
+		if hit and hit.Instance then
+			local idx = hit.Instance:GetAttribute("idx")
+			local part = idx and self._vehicle:GetParts()[idx]
+			if part then
+				local tdef = part.def
+				local th, tr = tdef.height or 0, tdef.radius or 3
+				local gh = math.max(d.def.height or 0, 1.2)
+				local gr = d.def.radius or 3
+				local targetWorld = self:_buildToWorld(part.cf)
+				local localN = targetWorld:VectorToObjectSpace(hit.Normal)
+				if math.abs(localN.Y) > 0.6 then
+					-- stack onto the cap the surface normal points out of
+					local sign = (localN.Y >= 0) and 1 or -1
+					local buildCF = part.cf * CFrame.new(0, sign * (th * 0.5 + gh * 0.5), 0)
+					local node = (targetWorld * CFrame.new(0, sign * th * 0.5, 0)).Position
+					return buildCF, idx, node
+				else
+					-- surface (radial) attach: out from the target axis to its skin + radius
+					local axisY = targetWorld.UpVector
+					local rel = hit.Position - targetWorld.Position
+					local along = rel:Dot(axisY)
+					local radial = rel - axisY * along
+					if radial.Magnitude < 1e-3 then
+						radial = Vector3.new(1, 0, 0)
+					end
+					radial = radial.Unit
+					local centerWorld = targetWorld.Position + axisY * along + radial * (tr + gr)
+					return self:_worldToBuild(CFrame.new(centerWorld)), idx, hit.Position
+				end
+			end
+		end
+	end
+
+	return self:_freePlane(), nil, nil
+end
+
+function VABController:_updateGhost()
+	local d = self._drag
+	if not d or not Workspace.CurrentCamera then
+		return
+	end
+	local buildCF, parent, node = self:_snapTarget()
+	self._snap = { cf = buildCF, parent = parent }
+	local worldCF = self:_buildToWorld(buildCF)
+	d.ghost.CFrame = d.pod and worldCF or (worldCF * CFrame.Angles(0, 0, math.rad(90)))
+	if node then
+		self._node.CFrame = CFrame.new(node)
+		self._node.Transparency = 0.2
+	else
 		self._node.Transparency = 1
 	end
 end
 
--- Where along the build axis (height above the base) the mouse points, via a vertical
--- plane through the rocket facing the camera.
-function VABController:_mouseHeight(base)
-	local cam = Workspace.CurrentCamera
-	local m = UserInputService:GetMouseLocation()
-	local ray = cam:ViewportPointToRay(m.X, m.Y)
-	local toCam = cam.CFrame.Position - base
-	local n = Vector3.new(toCam.X, 0, toCam.Z)
-	n = (n.Magnitude > 1e-3) and n.Unit or Vector3.zAxis
-	local denom = ray.Direction:Dot(n)
-	if math.abs(denom) < 1e-4 then
-		return 0
-	end
-	local t = (base - ray.Origin):Dot(n) / denom
-	local pt = ray.Origin + ray.Direction * t
-	return pt.Y - base.Y
-end
-
-function VABController:_updateGhost()
-	local base = self:_buildBase()
-	local design = self._vehicle:GetDesign()
-	local n = #design
-
-	-- Cumulative node heights (0 = bottom, n = top).
-	local cum = { [0] = 0 }
-	for i = 1, n do
-		cum[i] = cum[i - 1] + (design[i].height or 0)
-	end
-
-	local h = self:_mouseHeight(base)
-	local total = cum[n]
-	h = math.clamp(h, 0, total)
-
-	-- Snap to nearest node.
-	local bestK, bestD = 0, math.huge
-	for k = 0, n do
-		local d = math.abs(h - cum[k])
-		if d < bestD then
-			bestD = d
-			bestK = k
-		end
-	end
-	self._snapIndex = bestK + 1
-
-	local p = self._placing
-	local cy = cum[bestK] + p.gh * 0.5
-	local pos = base + Vector3.new(0, cy, 0)
-	if p.pod then
-		p.ghost.CFrame = CFrame.new(pos)
-	else
-		p.ghost.CFrame = CFrame.new(pos) * CFrame.Angles(0, 0, math.rad(90))
-	end
-
-	self._node.CFrame = CFrame.new(base + Vector3.new(0, cum[bestK], 0))
-	self._node.Transparency = 0.2
-end
-
-function VABController:_place()
-	local p = self._placing
-	if not p then
-		return
-	end
-	local idx = self._snapIndex or (#self._vehicle:GetDesign() + 1)
-	self:_endPlacing()
-	self._selected = idx
-	self._vehicle:InsertPart(idx, p.id)
-end
-
-function VABController:_trySelect()
+function VABController:_tryPickup()
 	local cam = Workspace.CurrentCamera
 	local craft = Workspace:FindFirstChild("Craft")
 	if not cam or not craft then
@@ -502,35 +599,37 @@ function VABController:_trySelect()
 	if result and result.Instance then
 		local idx = result.Instance:GetAttribute("idx")
 		if idx then
-			self._selected = idx
-			self:_updatePartPanel()
+			self:_beginDragExisting(idx)
 		end
 	end
 end
 
-function VABController:_onInput(input, gameProcessed)
+function VABController:_onInputBegan(input, gameProcessed)
 	if self._mode:GetMode() ~= "VAB" then
 		return
 	end
 	if input.UserInputType == Enum.UserInputType.MouseButton1 then
-		if gameProcessed then
-			return -- click landed on the UI
+		if gameProcessed or self._drag then
+			return -- click landed on UI, or a drag is already running
 		end
-		if self._placing then
-			self:_place()
-		else
-			self:_trySelect()
-		end
+		self:_tryPickup()
 	elseif input.KeyCode == Enum.KeyCode.Escape then
-		self:_endPlacing()
+		self:_cancelDrag(true)
+	elseif input.KeyCode == Enum.KeyCode.Delete or input.KeyCode == Enum.KeyCode.Backspace then
+		if self._drag then
+			self:_cancelDrag(false)
+		elseif self._selected then
+			self._vehicle:RemovePart(self._selected)
+			self._selected = nil
+		end
 	end
 end
 
 -- ------------------------------------------------------------- panels ----
 
 function VABController:_refresh()
-	local design = self._vehicle:GetDesign()
-	if self._selected and not design[self._selected] then
+	local parts = self._vehicle:GetParts()
+	if self._selected and not parts[self._selected] then
 		self._selected = nil
 	end
 	self:_updatePartPanel()
@@ -559,16 +658,21 @@ function VABController:_refresh()
 end
 
 function VABController:_updatePartPanel()
-	local design = self._vehicle:GetDesign()
-	local def = self._selected and design[self._selected]
+	local def
+	if self._drag then
+		def = self._drag.def
+	elseif self._selected then
+		local p = self._vehicle:GetParts()[self._selected]
+		def = p and p.def
+	end
 	if not def then
-		self._partLabel.Text = "Click a part on the rocket\nto inspect it."
+		self._partLabel.Text = "Hold + drag a part from the left,\nor a placed part, to move it."
 		self._partLabel.TextColor3 = DIM
 		self._removeBtn.Visible = false
 		return
 	end
 	self._partLabel.TextColor3 = TEXT
-	self._removeBtn.Visible = true
+	self._removeBtn.Visible = (self._selected ~= nil) and not self._drag
 	local lines = {}
 	lines[#lines + 1] = def.name
 	lines[#lines + 1] = "category  " .. def.category

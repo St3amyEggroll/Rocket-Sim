@@ -93,4 +93,4 @@ for _, name in ipairs(startOrder) do
 	end
 end
 
-print("[RocketSim] Client systems started -- build P10.2 (planet color/atmosphere clean-up: ocean-blue body + stronger limb glow).")
+print("[RocketSim] Client systems started -- build P11.0 (KSP 3D builder: drag-drop parts, free anchor, stack/surface snap, pick-up-to-move).")
