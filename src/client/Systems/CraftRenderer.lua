@@ -279,11 +279,24 @@ function CraftRenderer:_rebuildCraft()
 		CFrame = CFrame.new(axisX, bottomY + glowH * 0.4, axisZ),
 	})
 
+	-- Parachute canopy: a broad translucent dome above the nose, hidden until the flight
+	-- loop reports a deployed chute (in air).
+	local topY = (prof.base or 0) + (prof.length or 0)
+	local canopy = makePart(model, "Chute", {
+		Shape = Enum.PartType.Ball,
+		Size = Vector3.new(bottomRadius * 5.5, bottomRadius * 3.2, bottomRadius * 5.5),
+		Color = Color3.fromRGB(228, 96, 76),
+		Material = Enum.Material.SmoothPlastic,
+		Transparency = 1,
+		CFrame = CFrame.new(axisX, topY + bottomRadius * 1.6, axisZ),
+	})
+
 	model.Parent = Workspace
 	self._craft = model
 	self._flame = flame
 	self._flameLight = light
 	self._reentryGlow = glow
+	self._chute = canopy
 	self._exploded = false
 end
 
@@ -367,6 +380,10 @@ function CraftRenderer:_render(state, info)
 	else
 		self._flame.Transparency = 1
 		self._flameLight.Enabled = false
+	end
+
+	if self._chute then
+		self._chute.Transparency = (info and info.chuteDeployed) and 0.3 or 1
 	end
 
 	local re = (info and info.reentry) or 0

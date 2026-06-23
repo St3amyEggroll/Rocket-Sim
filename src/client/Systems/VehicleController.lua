@@ -39,9 +39,10 @@ end
 local function isEngine(def)
 	return def ~= nil and def.category == "engine"
 end
--- An "actuator" is a part that does something when its stage fires (ignite / separate).
+-- An "actuator" is a part that does something when its stage fires (ignite engine /
+-- separate decoupler / deploy parachute).
 local function isActuator(def)
-	return isEngine(def) or isDecoupler(def)
+	return isEngine(def) or isDecoupler(def) or (def ~= nil and def.parachute == true)
 end
 
 function VehicleController:Init()
@@ -132,7 +133,10 @@ function VehicleController:_computeSections()
 	end
 	for i, p in ipairs(parts) do
 		local pr = p.parent
-		if pr and parts[pr] and not isDecoupler(p.def) and not isDecoupler(parts[pr].def) then
+		-- Fuel conducts only through STACK (node) joints -- never across a surface/radial
+		-- attachment or a decoupler -- so side boosters keep their own fuel and don't feed
+		-- (or drain) the core.
+		if pr and parts[pr] and not p.surface and not isDecoupler(p.def) and not isDecoupler(parts[pr].def) then
 			local ri, rp = find(i), find(pr)
 			if ri ~= rp then
 				uf[ri] = rp
@@ -145,6 +149,12 @@ function VehicleController:_computeSections()
 			local root = find(i)
 			sectionOf[i] = root
 			capacity[root] = (capacity[root] or 0) + (p.def.fuel or 0)
+		end
+	end
+	-- Radial-mount engines carry no tank: they draw from the part they're bolted to.
+	for i, p in ipairs(parts) do
+		if isEngine(p.def) and p.def.radial and p.parent and sectionOf[p.parent] then
+			sectionOf[i] = sectionOf[p.parent]
 		end
 	end
 	self._sectionOf = sectionOf
@@ -319,12 +329,13 @@ end
 
 -- Place a part at a build-local CFrame, attached to `parent` (a part index or nil for
 -- the root). Returns the new part's index.
-function VehicleController:AddPartAt(id, cf, parent)
+function VehicleController:AddPartAt(id, cf, parent, surface)
 	local def = Catalog.get(id)
 	if not def then
 		return nil
 	end
-	table.insert(self._parts, { id = id, def = def, cf = cf, parent = parent })
+	-- `surface` records a radial/surface attach (no fuel crossfeed across it).
+	table.insert(self._parts, { id = id, def = def, cf = cf, parent = parent, surface = surface or false })
 	self:_recompute()
 	return #self._parts
 end
@@ -406,7 +417,20 @@ function VehicleController:GetSectionFuelFrac(sec)
 	return math.clamp((self._sectionFuel[sec] or 0) / cap, 0, 1)
 end
 
--- For the staging panel: actuators grouped by stage, 1..stageCount.
+-- Kind tag for a part's staging chip / icon.
+local function partKind(def)
+	if isEngine(def) then
+		return "engine"
+	elseif def.parachute then
+		return "chute"
+	elseif def.radial then
+		return "radialdecoupler"
+	end
+	return "decoupler"
+end
+
+-- For the staging panel: actuators grouped by stage, then by part id (symmetry copies
+-- collapse into one chip carrying a count + every copy's index).
 function VehicleController:GetStageContents()
 	local out = {}
 	for s = 1, (self._stageCount or 0) do
@@ -416,21 +440,40 @@ function VehicleController:GetStageContents()
 		if isActuator(p.def) and p.stage then
 			local s = math.clamp(p.stage, 1, math.max(self._stageCount or 1, 1))
 			out[s] = out[s] or {}
-			out[s][#out[s] + 1] = { index = i, def = p.def, kind = isEngine(p.def) and "engine" or "decoupler" }
+			local group
+			for _, g in ipairs(out[s]) do
+				if g.id == p.id then
+					group = g
+					break
+				end
+			end
+			if group then
+				group.count += 1
+				group.indices[#group.indices + 1] = i
+			else
+				out[s][#out[s] + 1] =
+					{ id = p.id, def = p.def, kind = partKind(p.def), count = 1, indices = { i } }
+			end
 		end
 	end
 	return out
 end
 
-function VehicleController:SetPartStage(index, stage)
-	local p = self._parts[index]
-	if not p or not isActuator(p.def) then
-		return
-	end
+function VehicleController:SetPartsStage(indices, stage)
 	self._autoStage = false
-	p.stage = math.max(1, math.floor(stage))
-	self._stageFloor = math.max(self._stageFloor or 0, p.stage)
+	stage = math.max(1, math.floor(stage))
+	for _, i in ipairs(indices) do
+		local p = self._parts[i]
+		if p and isActuator(p.def) then
+			p.stage = stage
+		end
+	end
+	self._stageFloor = math.max(self._stageFloor or 0, stage)
 	self:_recompute()
+end
+
+function VehicleController:SetPartStage(index, stage)
+	self:SetPartsStage({ index }, stage)
 end
 
 -- Swap two stages' fire order (▲▼ in the panel).
@@ -755,13 +798,36 @@ function VehicleController:GetHeight(): number
 	return self:GetRotProfile().length
 end
 
--- Summed aerodynamic drag area of the active parts (used by the atmosphere model).
+-- Summed aerodynamic drag area of the active parts (the body's own drag -- this is what
+-- the aero-torque model uses, so a deployed chute can't flip the craft).
 function VehicleController:GetDragArea(): number
 	local a = 0
 	for _, def in ipairs(self:GetActiveParts()) do
 		a += def.drag or 0
 	end
 	return a
+end
+
+-- Extra drag from DEPLOYED parachutes (stage already fired). Added to the translational
+-- drag only -- it slows the descent without contributing aero torque.
+function VehicleController:GetChuteDragArea(): number
+	local a = 0
+	for i, p in ipairs(self._parts) do
+		if self:_isActive(i) and p.def.parachute and (p.stage or math.huge) <= self._stageIndex then
+			a += p.def.chuteDrag or 0
+		end
+	end
+	return a
+end
+
+-- True if a parachute has been staged (so the renderer can show its canopy in air).
+function VehicleController:HasDeployedChute(): boolean
+	for i, p in ipairs(self._parts) do
+		if self:_isActive(i) and p.def.parachute and (p.stage or math.huge) <= self._stageIndex then
+			return true
+		end
+	end
+	return false
 end
 
 -- Rotational profile of the active stack, measured along the body axis (+Y = nose),

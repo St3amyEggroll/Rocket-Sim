@@ -52,6 +52,18 @@ PartCatalog.parts = {
 		shape = "tank",
 		drag = 0.2,
 	},
+	TankXL = {
+		id = "TankXL",
+		name = "Fuel Tank (XL)",
+		category = "fuel",
+		mass = 0.6,
+		fuel = 9.0,
+		height = 12,
+		radius = 3,
+		color = Color3.fromRGB(240, 243, 248),
+		shape = "tank",
+		drag = 0.25,
+	},
 	EngineMain = {
 		id = "EngineMain",
 		name = "Main Engine",
@@ -62,6 +74,19 @@ PartCatalog.parts = {
 		height = 3.5,
 		radius = 3,
 		color = Color3.fromRGB(92, 94, 102),
+		shape = "engine",
+		drag = 0.3,
+	},
+	EngineLarge = {
+		id = "EngineLarge",
+		name = "Heavy Engine",
+		category = "engine",
+		mass = 1.4,
+		thrust = 620,
+		exhaustVelocity = 195,
+		height = 4.5,
+		radius = 3,
+		color = Color3.fromRGB(78, 80, 88),
 		shape = "engine",
 		drag = 0.3,
 	},
@@ -77,6 +102,47 @@ PartCatalog.parts = {
 		color = Color3.fromRGB(120, 100, 70),
 		shape = "engine",
 		drag = 0.3,
+	},
+	EngineRadial = {
+		id = "EngineRadial",
+		name = "Radial Engine",
+		category = "engine",
+		mass = 0.25,
+		thrust = 95,
+		exhaustVelocity = 220,
+		height = 2.6,
+		radius = 0.8,
+		color = Color3.fromRGB(150, 120, 84),
+		shape = "engine",
+		drag = 0.2,
+		radial = true, -- bolts to a body's side; draws fuel from the part it's bolted to
+	},
+	SRB = {
+		id = "SRB",
+		name = "Solid Booster",
+		category = "engine",
+		mass = 0.9,
+		thrust = 430,
+		exhaustVelocity = 160,
+		fuel = 7.0, -- self-contained: an engine that carries its own solid fuel
+		height = 9,
+		radius = 1.6,
+		color = Color3.fromRGB(206, 200, 188),
+		shape = "engine",
+		drag = 0.4,
+	},
+	Parachute = {
+		id = "Parachute",
+		name = "Parachute",
+		category = "structure",
+		mass = 0.1,
+		height = 1.2,
+		radius = 2,
+		color = Color3.fromRGB(220, 96, 76),
+		shape = "parachute",
+		drag = 0.2, -- stowed
+		chuteDrag = 300, -- huge extra drag once deployed (in air) -> a soft landing
+		parachute = true, -- deploys when its stage fires
 	},
 	Fin = {
 		id = "Fin",
@@ -119,7 +185,21 @@ PartCatalog.parts = {
 }
 
 -- Display order in the VAB palette.
-PartCatalog.order = { "Pod", "TankS", "TankL", "EngineMain", "EngineVac", "Fin", "Decoupler", "RadialDecoupler" }
+PartCatalog.order = {
+	"Pod",
+	"TankS",
+	"TankL",
+	"TankXL",
+	"EngineMain",
+	"EngineLarge",
+	"EngineVac",
+	"EngineRadial",
+	"SRB",
+	"Fin",
+	"Parachute",
+	"Decoupler",
+	"RadialDecoupler",
+}
 
 function PartCatalog.get(id)
 	return PartCatalog.parts[id]

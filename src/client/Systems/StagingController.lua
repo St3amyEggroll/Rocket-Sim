@@ -334,27 +334,48 @@ function StagingController:_makeRow(stage, chips, current, stageCount)
 	self._rows[#self._rows + 1] = { frame = row, stage = stage }
 end
 
-function StagingController:_chipLabel(chip)
-	if chip.kind == "engine" then
-		return "E"
-	elseif chip.def.radial then
-		return "R"
-	end
-	return "D"
+-- Little glyph icons per part kind (instead of E/D/R letters).
+local ICON = {
+	engine = "🔥",
+	chute = "🪂",
+	decoupler = "✂️",
+	radialdecoupler = "✂️",
+}
+
+function StagingController:_chipIcon(chip)
+	return ICON[chip.kind] or "•"
 end
 
 function StagingController:_makeChip(holder, chip, fired)
 	local b = Instance.new("TextButton")
-	b.Size = UDim2.fromOffset(30, 28)
-	b.BackgroundColor3 = fired and DIM or (chip.kind == "engine" and ENGINE_C or DEC_C)
+	b.Size = UDim2.fromOffset(32, 28)
+	b.BackgroundColor3 = fired and DIM or (chip.def.color or ENGINE_C)
 	b.BorderSizePixel = 0
 	b.Font = Enum.Font.GothamBold
-	b.TextSize = 14
+	b.TextSize = 16
 	b.TextColor3 = Color3.fromRGB(20, 22, 28)
-	b.Text = self:_chipLabel(chip)
+	b.Text = self:_chipIcon(chip)
 	b.AutoButtonColor = self._editable
 	b.Parent = holder
 	corner(b, 5)
+
+	-- Symmetry count badge (e.g. "2") when this chip stands for several copies.
+	if chip.count and chip.count > 1 then
+		local badge = Instance.new("TextLabel")
+		badge.AnchorPoint = Vector2.new(1, 0)
+		badge.Position = UDim2.new(1, 2, 0, -3)
+		badge.Size = UDim2.fromOffset(15, 15)
+		badge.BackgroundColor3 = LIVE
+		badge.BorderSizePixel = 0
+		badge.Font = Enum.Font.GothamBold
+		badge.TextSize = 11
+		badge.TextColor3 = Color3.fromRGB(16, 20, 16)
+		badge.Text = tostring(chip.count)
+		badge.ZIndex = 3
+		badge.Parent = b
+		corner(badge, 7)
+	end
+
 	if self._editable then
 		b.MouseButton1Down:Connect(function()
 			self:_beginDrag(chip)
@@ -362,23 +383,23 @@ function StagingController:_makeChip(holder, chip, fired)
 	end
 end
 
--- ---- chip dragging ----
+-- ---- chip dragging (moves the whole symmetry group) ----
 
 function StagingController:_beginDrag(chip)
 	self:_cancelDrag()
 	local ghost = Instance.new("TextLabel")
-	ghost.Size = UDim2.fromOffset(34, 30)
-	ghost.BackgroundColor3 = chip.kind == "engine" and ENGINE_C or DEC_C
+	ghost.Size = UDim2.fromOffset(36, 30)
+	ghost.BackgroundColor3 = chip.def.color or ENGINE_C
 	ghost.BackgroundTransparency = 0.1
 	ghost.BorderSizePixel = 0
 	ghost.Font = Enum.Font.GothamBold
-	ghost.TextSize = 15
+	ghost.TextSize = 17
 	ghost.TextColor3 = Color3.fromRGB(20, 22, 28)
-	ghost.Text = self:_chipLabel(chip)
+	ghost.Text = self:_chipIcon(chip)
 	ghost.ZIndex = 50
 	ghost.Parent = self._gui
 	corner(ghost, 6)
-	self._chipDrag = { index = chip.index, ghost = ghost }
+	self._chipDrag = { indices = chip.indices, ghost = ghost }
 	self:_moveGhost()
 end
 
@@ -409,7 +430,7 @@ function StagingController:_dropChip()
 	end
 	self:_cancelDrag()
 	if target then
-		self._vehicle:SetPartStage(d.index, target)
+		self._vehicle:SetPartsStage(d.indices, target)
 	end
 end
 

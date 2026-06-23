@@ -506,6 +506,7 @@ function VABController:_beginDragExisting(index)
 		pod = (part.def.shape == "pod"),
 		originalCF = part.cf,
 		originalParent = part.parent,
+		originalSurface = part.surface,
 	}
 	self._selected = nil
 	self._vehicle:RemovePart(index) -- lift it off; rebuilds the live model without it
@@ -527,7 +528,7 @@ function VABController:_cancelDrag(restore)
 		self._node.Transparency = 1
 	end
 	if restore and d.originalCF then
-		self._selected = self._vehicle:AddPartAt(d.id, d.originalCF, d.originalParent)
+		self._selected = self._vehicle:AddPartAt(d.id, d.originalCF, d.originalParent, d.originalSurface)
 	end
 	self:_updatePartPanel()
 end
@@ -558,7 +559,7 @@ function VABController:_onRelease()
 	if isSurface and parent and self._symmetry > 1 then
 		self._selected = self:_placeSymmetry(d.id, cf, parent, self._symmetry)
 	else
-		self._selected = self._vehicle:AddPartAt(d.id, cf, parent)
+		self._selected = self._vehicle:AddPartAt(d.id, cf, parent, isSurface)
 	end
 	self:_updatePartPanel()
 end
@@ -566,7 +567,7 @@ end
 function VABController:_placeSymmetry(id, cf, parent, n)
 	local parentPart = self._vehicle:GetParts()[parent]
 	if not parentPart then
-		return self._vehicle:AddPartAt(id, cf, parent)
+		return self._vehicle:AddPartAt(id, cf, parent, true)
 	end
 	local px, pz = parentPart.cf.X, parentPart.cf.Z
 	local ox, oz = cf.X - px, cf.Z - pz
@@ -575,7 +576,7 @@ function VABController:_placeSymmetry(id, cf, parent, n)
 	for k = 0, n - 1 do
 		local a = k * (2 * math.pi / n)
 		local ca, sa = math.cos(a), math.sin(a)
-		last = self._vehicle:AddPartAt(id, CFrame.new(px + ox * ca - oz * sa, y, pz + ox * sa + oz * ca), parent)
+		last = self._vehicle:AddPartAt(id, CFrame.new(px + ox * ca - oz * sa, y, pz + ox * sa + oz * ca), parent, true)
 	end
 	return last
 end

@@ -306,7 +306,7 @@ function FlightController:_step(rawDt)
 			if inAtmo and warp > 1 then
 				self._input:ResetWarp()
 			end
-			local k = A.dragCoeff * self._vehicle:GetDragArea() / math.max(self._vehicle:GetCurrentMass(), 1e-3)
+			local k = A.dragCoeff * (self._vehicle:GetDragArea() + self._vehicle:GetChuteDragArea()) / math.max(self._vehicle:GetCurrentMass(), 1e-3)
 			self._state = Orbit.integrate(self._state, self._mu, dt, function(p2, v2)
 				local ax, ay, az = 0, 0, 0
 				if powered then
@@ -361,6 +361,7 @@ function FlightController:_step(rawDt)
 		status = self._status,
 		inAtmo = inAtmo,
 		reentry = reentry,
+		chuteDeployed = inAtmo and self._vehicle:HasDeployedChute(),
 		tele = self._vehicle:GetTelemetry(throttle),
 	})
 end
