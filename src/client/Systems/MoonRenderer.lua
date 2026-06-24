@@ -16,6 +16,7 @@ local Shared = ReplicatedStorage:WaitForChild("Shared")
 
 local Config = require(Shared:WaitForChild("Config"))
 local Registry = require(Shared:WaitForChild("Registry"))
+local RenderScale = require(Shared:WaitForChild("RenderScale"))
 
 local MoonRenderer = {}
 
@@ -23,7 +24,6 @@ local BASE = 2048
 
 function MoonRenderer:Init()
 	self._radius = Config.MOON.radius
-	self._maxRender = Config.MOON.radius + Config.CAMERA.distanceMax + 4000
 end
 
 function MoonRenderer:Start()
@@ -75,13 +75,9 @@ function MoonRenderer:_update()
 	local toMoon = center - camPos
 	local dist = toMoon.Magnitude
 
-	local renderCenter, scale
-	if dist <= self._maxRender or dist < 1e-3 then
-		renderCenter, scale = center, 1
-	else
-		scale = self._maxRender / dist
-		renderCenter = camPos + toMoon.Unit * self._maxRender
-	end
+	-- Depth-correct pull-in (shared with Planet/Sun so occlusion is right).
+	local rd, scale = RenderScale.pull(dist, Config.RENDER.nearDist, Config.RENDER.maxDist)
+	local renderCenter = (dist < 1e-3) and center or (camPos + toMoon.Unit * rd)
 
 	local d = self._radius * 2 * scale / BASE
 	self._mesh.Scale = Vector3.new(d, d, d)

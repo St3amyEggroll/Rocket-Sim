@@ -61,6 +61,18 @@ function CameraController:Start()
 	end)
 end
 
+-- Altitude (above the active body) at which the camera starts switching from surface
+-- (planet-down) to orbital (plane-level). Above the atmosphere for Terra; a low fixed
+-- altitude for the airless Mun; ~0 for the Sun (you're always in deep space there).
+function CameraController:_orbitCamAlt(bodyId)
+	if bodyId == "moon" then
+		return Config.CAMERA.orbitCamAltMoon
+	elseif bodyId == "sun" then
+		return 0
+	end
+	return Config.ATMOSPHERE.top
+end
+
 function CameraController:_update(state, info)
 	local cam = self._camera
 	if not cam then
@@ -113,10 +125,33 @@ function CameraController:_update(state, info)
 		return
 	end
 
-	-- Gravity-aligned chase: up = local vertical (radial).
+	-- Chase camera. Low over a body: gravity-aligned (up = local vertical / radial), so the
+	-- planet stays DOWN for launch / re-entry / landing. Out in space: lock to the ORBITAL
+	-- plane (up = orbit normal) so the view doesn't slowly rotate as you coast and "up/down"
+	-- tilts you above/below the orbit. Blend smoothly across an altitude band.
 	local p = state.position
-	local up = Vector3.new(p.x, p.y, p.z)
-	up = (up.Magnitude > 1e-3) and up.Unit or Vector3.yAxis
+	local r = Vector3.new(p.x, p.y, p.z)
+	local radial = (r.Magnitude > 1e-3) and r.Unit or Vector3.yAxis
+	local up = radial
+
+	local bodyRadius = (info and info.bodyRadius) or self._bodyRadius or 1
+	local alt = r.Magnitude - bodyRadius
+	local thr = self:_orbitCamAlt(info and info.bodyId)
+	local orbT = math.clamp((alt - thr) / Config.CAMERA.orbitCamBand, 0, 1)
+	if orbT > 0 then
+		local vo = Vector3.new(state.velocity.x, state.velocity.y, state.velocity.z)
+		local nRaw = r:Cross(vo)
+		-- Need real transverse velocity for a meaningful plane (a pure vertical hop has none).
+		if nRaw.Magnitude > r.Magnitude * vo.Magnitude * 0.15 then
+			local n = nRaw.Unit
+			if self._lastNormal and n:Dot(self._lastNormal) < 0 then
+				n = -n -- keep the same side of the plane frame-to-frame (no sudden flip)
+			end
+			self._lastNormal = n
+			up = radial:Lerp(n, orbT)
+			up = (up.Magnitude > 1e-3) and up.Unit or n
+		end
+	end
 
 	-- Camera heading: the velocity projected onto the local horizon. When flying straight
 	-- up/down (ascent/descent) the horizontal part is tiny and its DIRECTION is noise, which

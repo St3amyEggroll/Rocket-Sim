@@ -19,6 +19,7 @@ local Shared = ReplicatedStorage:WaitForChild("Shared")
 
 local Config = require(Shared:WaitForChild("Config"))
 local Registry = require(Shared:WaitForChild("Registry"))
+local RenderScale = require(Shared:WaitForChild("RenderScale"))
 
 local SunRenderer = {}
 
@@ -26,13 +27,8 @@ local BASE = 2048
 
 function SunRenderer:Init()
 	self._radius = Config.SUN.radius
-	-- The Sun is always far (Terra's orbit is huge), so it is always pulled in. The pull
-	-- distance must stay inside Roblox's proxy-part draw range (the planet renders out to
-	-- ~radius+distanceMax+4000 ~ 23k), so we pull the Sun to a fixed distance JUST inside
-	-- that -- its angular size is preserved by the scale factor regardless of the distance.
-	-- (At its true radius the old +radius term pushed this to ~73k, past the draw range, so
-	-- the Sun never appeared.)
-	self._maxRender = Config.CAMERA.distanceMax + 11000
+	-- Pull-in distance comes from the shared RenderScale (Config.RENDER) so the Sun, always
+	-- far, compresses to ~maxDist and renders BEHIND Terra/the Mun rather than through them.
 end
 
 function SunRenderer:_makeSphere(name, color, material, transparency)
@@ -99,13 +95,10 @@ function SunRenderer:_update()
 	local toSun = center - camPos
 	local dist = toSun.Magnitude
 
-	local renderCenter, scale
-	if dist <= self._maxRender or dist < 1e-3 then
-		renderCenter, scale = center, 1
-	else
-		scale = self._maxRender / dist
-		renderCenter = camPos + toSun.Unit * self._maxRender
-	end
+	-- Depth-correct pull-in (shared with Planet/Moon): the Sun is always far, so it compresses
+	-- to nearly maxDist and therefore renders BEHIND Terra/the Mun instead of through them.
+	local rd, scale = RenderScale.pull(dist, Config.RENDER.nearDist, Config.RENDER.maxDist)
+	local renderCenter = (dist < 1e-3) and center or (camPos + toSun.Unit * rd)
 
 	self:_apply(self._mesh, self._ball, self._radius * 2 * scale, renderCenter)
 	self:_apply(self._coronaMesh, self._corona, self._radius * 2.4 * scale, renderCenter)

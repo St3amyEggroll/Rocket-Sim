@@ -29,6 +29,7 @@ local Orbit = require(Shared:WaitForChild("OrbitMechanics"))
 local Config = require(Shared:WaitForChild("Config"))
 local Registry = require(Shared:WaitForChild("Registry"))
 local Planet = require(Shared:WaitForChild("Planet"))
+local RenderScale = require(Shared:WaitForChild("RenderScale"))
 
 local PlanetRenderer = {}
 
@@ -51,7 +52,6 @@ function PlanetRenderer:Init()
 	self._surfaceRadius = Config.BODY.radius
 	-- Cosmetic atmosphere: a thin limb only (kept close to the surface, gone below ~4k alt).
 	self._atmoRadius = Config.BODY.radius + math.min(Config.ATMOSPHERE.top, 1800)
-	self._maxRender = Config.BODY.radius + Config.CAMERA.distanceMax + 4000
 end
 
 function PlanetRenderer:_makeSphere(name, color, material, transparency)
@@ -171,20 +171,14 @@ function PlanetRenderer:_update()
 	local dist = toPlanet.Magnitude
 
 	-- Show the biome tiles only from SPACE -- high enough that terrain has unloaded (so they
-	-- never poke through the ground) and still within render range (far out it's just a dot).
+	-- never poke through the ground) and only while the body is drawn at TRUE scale (within
+	-- nearDist); past that it's compressed to a dot and the tiles would no longer align.
 	local fromSpace = dist > (self._surfaceRadius + Config.TERRAIN.streamOutAlt)
-	self:_setShell(fromSpace and dist <= self._maxRender)
+	self:_setShell(fromSpace and dist <= Config.RENDER.nearDist)
 
-	local renderCenter, scale
-	if dist <= self._maxRender or dist < 1e-3 then
-		-- Within range: draw at true scale and position; terrain aligns with it.
-		renderCenter = center
-		scale = 1
-	else
-		-- Pull the far body into render range, preserving its angular size.
-		scale = self._maxRender / dist
-		renderCenter = camPos + toPlanet.Unit * self._maxRender
-	end
+	-- Depth-correct pull-in (shared with Moon/Sun so occlusion is right).
+	local rd, scale = RenderScale.pull(dist, Config.RENDER.nearDist, Config.RENDER.maxDist)
+	local renderCenter = (dist < 1e-3) and center or (camPos + toPlanet.Unit * rd)
 
 	self:_apply(self._ballMesh, self._ball, self._trueRadius * 2 * scale, renderCenter)
 	if self._atmo then

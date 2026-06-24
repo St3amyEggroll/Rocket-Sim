@@ -207,6 +207,16 @@ Config.CONTROL = {
 	thrustTorqueScale = 0.12, -- how hard off-centre engine thrust torques the craft
 	maxOmega = 12, -- rad/s angular-velocity safety cap
 }
+-- Shared pull-in range for the distant bodies (Planet / Moon / Sun). Within nearDist a body
+-- is drawn at true distance (scale 1) so terrain/surfaces align; beyond it its render
+-- distance is compressed toward maxDist, shared across bodies so occlusion is correct (the
+-- far Sun stays behind Terra/the Mun). maxDist must stay inside Roblox's proxy draw range;
+-- nearDist must exceed body radius + max camera zoom so surfaces never compress.
+Config.RENDER = {
+	nearDist = 21000,
+	maxDist = 23000,
+}
+
 Config.FLOATING_ORIGIN = {
 	rebaseThreshold = 1e9, -- legacy single-threshold rebase (unused by the body policy)
 	-- Within this distance of the body centre the origin is pinned to 0 (so the fixed
@@ -248,6 +258,10 @@ Config.CAMERA = {
 	-- Map zoom now scales the SCHEMATIC CONTENT (the camera stays at a fixed, render-safe
 	-- distance). The range is wide so you can zoom from a local orbit out to the whole
 	-- Sun/Terra/Mun system; the actual view radius is clamped to sane bounds in MapView.
+	-- Orbital camera: above its body's threshold altitude the camera locks to the orbital
+	-- plane (up = orbit normal); below it stays planet-down. Blended over orbitCamBand studs.
+	orbitCamBand = 4000,
+	orbitCamAltMoon = 1200, -- the airless Mun has no atmosphere to key off, so use a fixed alt
 	mapZoomMin = 0.25,
 	mapZoomMax = 140,
 	-- Fixed map camera distance = frameSize * this. Kept so the whole schematic (content is
