@@ -199,6 +199,9 @@ Config.LAUNCH = {
 	site = Vector3.new(1, 0, 0),
 	turnStartAlt = 150,
 	turnEndAlt = 1200,
+	-- The launch pad is a raised platform: its deck (and the craft's base) sit this many studs
+	-- above the terrain at the site, so the rocket stands ON the pad instead of in the ground.
+	padHeight = 10,
 }
 
 -- Attitude is now a real rigid-body rotation: the craft has angular velocity and a

@@ -40,6 +40,18 @@ PartCatalog.parts = {
 		shape = "tank",
 		drag = 0.2,
 	},
+	TankM = {
+		id = "TankM",
+		name = "Fuel Tank (M)",
+		category = "fuel",
+		mass = 0.26,
+		fuel = 3.1,
+		height = 5.5,
+		radius = 3,
+		color = Color3.fromRGB(232, 235, 242),
+		shape = "tank",
+		drag = 0.2,
+	},
 	TankL = {
 		id = "TankL",
 		name = "Fuel Tank (L)",
@@ -86,6 +98,19 @@ PartCatalog.parts = {
 		color = Color3.fromRGB(214, 218, 226),
 		shape = "nose",
 		drag = 0.04, -- streamlined: very low drag, so it caps a stack and pulls the CoP DOWN
+	},
+	EngineSmall = {
+		id = "EngineSmall",
+		name = "Light Engine",
+		category = "engine",
+		mass = 0.3,
+		thrust = 120,
+		exhaustVelocity = 210,
+		height = 3,
+		radius = 2.4,
+		color = Color3.fromRGB(104, 106, 114),
+		shape = "engine",
+		drag = 0.25,
 	},
 	EngineMain = {
 		id = "EngineMain",
@@ -169,6 +194,21 @@ PartCatalog.parts = {
 		solid = true, -- ignites when its stage fires and burns at FULL thrust to depletion;
 		-- throttle has no effect and it can't be shut off or restarted (a real SRB).
 	},
+	SRBLarge = {
+		id = "SRBLarge",
+		name = "Heavy Booster",
+		category = "engine",
+		mass = 1.7,
+		thrust = 820,
+		exhaustVelocity = 168,
+		fuel = 19.0, -- self-contained solid fuel
+		height = 13,
+		radius = 1.9,
+		color = Color3.fromRGB(212, 206, 196),
+		shape = "engine",
+		drag = 0.5,
+		solid = true, -- ignites on its stage, full thrust to depletion, no throttle/shutoff
+	},
 	Parachute = {
 		id = "Parachute",
 		name = "Parachute",
@@ -193,6 +233,18 @@ PartCatalog.parts = {
 		shape = "fins",
 		drag = 0.9, -- lots of drag where they sit -> pulls the centre of pressure there
 		radial = true, -- surface-attaches to a body's side
+	},
+	Winglet = {
+		id = "Winglet",
+		name = "Winglet",
+		category = "structure",
+		mass = 0.08,
+		height = 0, -- small control surface; sits where it's placed on the stack
+		radius = 2,
+		color = Color3.fromRGB(150, 80, 70),
+		shape = "fins",
+		drag = 0.45, -- modest drag -> gentle stability nudge (lighter than full tail fins)
+		radial = true,
 	},
 	Decoupler = {
 		id = "Decoupler",
@@ -240,16 +292,20 @@ PartCatalog.order = {
 	"Pod",
 	"NoseCone",
 	"TankS",
+	"TankM",
 	"TankL",
 	"TankXL",
 	"TankXXL",
+	"EngineSmall",
 	"EngineMain",
 	"EngineLarge",
 	"EngineXL",
 	"EngineVac",
 	"EngineRadial",
 	"SRB",
+	"SRBLarge",
 	"Fin",
+	"Winglet",
 	"Parachute",
 	"Decoupler",
 	"RadialDecoupler",

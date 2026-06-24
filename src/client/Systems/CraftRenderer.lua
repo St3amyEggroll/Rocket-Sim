@@ -1,8 +1,8 @@
 --[[
 	CraftRenderer
-	Owner of: the rendered rocket, the launch pad, lighting, and one-time world
-	cleanup. The planet itself is real Roblox Terrain (see TerrainController), fixed
-	at the world origin, so it needs no per-frame rendering here.
+	Owner of: the rendered rocket, lighting, and one-time world cleanup. The launch pad +
+	VAB building are owned by LaunchSiteController; the planet itself is real Roblox Terrain
+	(see TerrainController), fixed at the world origin, so it needs no per-frame rendering here.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -13,7 +13,6 @@ local Shared = ReplicatedStorage:WaitForChild("Shared")
 
 local Orbit = require(Shared:WaitForChild("OrbitMechanics"))
 local Registry = require(Shared:WaitForChild("Registry"))
-local Planet = require(Shared:WaitForChild("Planet"))
 local PartPreview = require(Shared:WaitForChild("PartPreview"))
 
 local CraftRenderer = {}
@@ -66,7 +65,7 @@ function CraftRenderer:Start()
 	self._launchUp = Flight:GetLaunchUp() -- radial-out at the launch site (build +Y -> this)
 
 	self:_cleanupWorld()
-	self:_buildPad()
+	-- The launch pad + VAB building are owned by LaunchSiteController now.
 	self:_rebuildCraft()
 
 	-- Staged fires BEFORE Changed, so split off the spent stage(s) from the live model
@@ -161,19 +160,6 @@ function CraftRenderer:_cleanupWorld()
 			inst:Destroy()
 		end
 	end
-end
-
-function CraftRenderer:_buildPad()
-	-- Fixed at the equatorial launch site, oriented radial-out, top flush with the terrain
-	-- there (origin is fixed, so this never moves). CanCollide so it reads as solid ground.
-	local up = self._launchUp
-	local surf = Planet.radiusForUnit(up.X, up.Y, up.Z)
-	makePart(Workspace, "LaunchPad", {
-		Size = Vector3.new(120, 8, 120),
-		Color = Color3.fromRGB(90, 92, 100),
-		Material = Enum.Material.Metal,
-		CFrame = pointCFrame(up * (surf - 4), up),
-	})
 end
 
 function CraftRenderer:_buildFins(model, centerPos, radius, stage, index)

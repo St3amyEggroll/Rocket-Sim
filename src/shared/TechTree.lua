@@ -23,9 +23,9 @@ TechTree.nodes = {
 
 	-- First ring: three independent directions branching off the root.
 	{ id = "aerodynamics", name = "Aerodynamics", col = 1, row = 1, cost = 3, requires = { "basics" },
-		parts = { "Fin", "NoseCone" } },
+		parts = { "Fin", "Winglet", "NoseCone" } },
 	{ id = "generalRocketry", name = "General Rocketry", col = 1, row = 3, cost = 4, requires = { "basics" },
-		parts = { "TankL" } },
+		parts = { "TankM", "TankL", "EngineSmall" } },
 	{ id = "engineering", name = "Engineering", col = 1, row = 5, cost = 5, requires = { "basics" },
 		parts = { "Decoupler" } },
 
@@ -37,7 +37,7 @@ TechTree.nodes = {
 	{ id = "heavyRocketry", name = "Heavy Rocketry", col = 2, row = 3, cost = 12, requires = { "generalRocketry" },
 		parts = { "EngineLarge" } },
 	{ id = "boosters", name = "Boosters", col = 2, row = 5, cost = 10, requires = { "engineering" },
-		parts = { "SRB", "RadialDecoupler" } },
+		parts = { "SRB", "SRBLarge", "RadialDecoupler" } },
 
 	-- Third ring.
 	{ id = "advFuelSystems", name = "Adv. Fuel Systems", col = 3, row = 2, cost = 16, requires = { "fuelSystems" },

@@ -87,7 +87,10 @@ function FlightController:Init()
 	local site = Config.LAUNCH.site
 	self._launchDir = site.Unit
 	local ld = self._launchDir
+	-- Sit the craft's base on top of the launch pad (terrain surface + the pad deck height),
+	-- not flush with the ground.
 	self._launchRadius = Planet.radiusForSim(Orbit.vec(ld.X * body.radius, ld.Y * body.radius, ld.Z * body.radius))
+		+ (Config.LAUNCH.padHeight or 0)
 
 	-- Nose points radial-out (along the launch direction).
 	self._state = {

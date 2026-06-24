@@ -37,6 +37,65 @@ local function corner(inst, r)
 	return inst
 end
 
+-- A one-line stat summary for a part, shown in the info panel.
+local function statText(def)
+	local s = ("%.2f t"):format(def.mass or 0)
+	if def.category == "engine" then
+		s = s .. ("  •  thrust %d"):format(def.thrust or 0)
+		if def.fuel then
+			s = s .. ("  •  solid")
+		end
+	elseif def.fuel then
+		s = s .. ("  •  fuel %.1f"):format(def.fuel)
+	elseif def.chuteDrag then
+		s = s .. "  •  parachute"
+	elseif def.landingLeg then
+		s = s .. "  •  landing legs"
+	end
+	return s
+end
+
+-- A row in the info panel's parts list: a 3D part icon + name + one-line stats.
+local function partRow(parent, def, order)
+	local row = Instance.new("Frame")
+	row.Size = UDim2.new(1, -6, 0, 46)
+	row.BackgroundColor3 = ROW
+	row.BorderSizePixel = 0
+	row.LayoutOrder = order
+	corner(row, 6)
+	row.Parent = parent
+
+	local thumb = PartPreview.thumbnail(def)
+	thumb.Size = UDim2.fromOffset(38, 38)
+	thumb.Position = UDim2.fromOffset(4, 4)
+	corner(thumb, 5)
+	thumb.Parent = row
+
+	local name = Instance.new("TextLabel")
+	name.Position = UDim2.fromOffset(50, 5)
+	name.Size = UDim2.new(1, -56, 0, 20)
+	name.BackgroundTransparency = 1
+	name.Font = Enum.Font.GothamBold
+	name.TextSize = 13
+	name.TextXAlignment = Enum.TextXAlignment.Left
+	name.TextColor3 = TEXT
+	name.Text = def.name
+	name.Parent = row
+
+	local stat = Instance.new("TextLabel")
+	stat.Position = UDim2.fromOffset(50, 25)
+	stat.Size = UDim2.new(1, -56, 0, 16)
+	stat.BackgroundTransparency = 1
+	stat.Font = Enum.Font.Code
+	stat.TextSize = 11
+	stat.TextXAlignment = Enum.TextXAlignment.Left
+	stat.TextColor3 = DIM
+	stat.Text = statText(def)
+	stat.Parent = row
+
+	return row
+end
+
 function TechController:Init()
 	self.Changed = Signal.new()
 	self._state = { science = 0, unlocked = { basics = true }, milestones = {} }
@@ -85,6 +144,7 @@ function TechController:_applyState(state)
 	end
 	self.Changed:Fire()
 	self:_refreshTree()
+	self:_refreshInfo()
 end
 
 function TechController:IsPartUnlocked(partId)
@@ -246,10 +306,11 @@ function TechController:_buildUI()
 		self._mode:SetMode("VAB")
 	end)
 
-	-- Scrollable graph canvas (the tree can be wider/taller than the panel).
+	-- Scrollable graph canvas (left side). The info panel sits to its right.
+	local INFO_W = 312
 	local graph = Instance.new("ScrollingFrame")
 	graph.Position = UDim2.fromOffset(12, 48)
-	graph.Size = UDim2.new(1, -24, 1, -60)
+	graph.Size = UDim2.new(1, -(INFO_W + 36), 1, -60)
 	graph.BackgroundColor3 = Color3.fromRGB(9, 12, 18)
 	graph.BackgroundTransparency = 0.2
 	graph.BorderSizePixel = 0
@@ -260,7 +321,170 @@ function TechController:_buildUI()
 	graph.Parent = panel
 
 	self:_buildGraph(graph)
+	self:_buildInfo(panel, INFO_W)
 	self:_refreshTree()
+	self:_selectNode(TechTree.nodes[1] and TechTree.nodes[1].id)
+end
+
+-- Right-side info panel: the selected node's name, status/cost, the parts it grants, and a
+-- research button. Populated by _refreshInfo whenever the selection or progress changes.
+function TechController:_buildInfo(panel, INFO_W)
+	local info = Instance.new("Frame")
+	info.AnchorPoint = Vector2.new(1, 0)
+	info.Position = UDim2.new(1, -12, 0, 48)
+	info.Size = UDim2.new(0, INFO_W, 1, -60)
+	info.BackgroundColor3 = Color3.fromRGB(15, 19, 26)
+	info.BackgroundTransparency = 0.05
+	info.BorderSizePixel = 0
+	corner(info, 10)
+	info.Parent = panel
+
+	self._infoName = Instance.new("TextLabel")
+	self._infoName.Position = UDim2.fromOffset(14, 12)
+	self._infoName.Size = UDim2.new(1, -28, 0, 26)
+	self._infoName.BackgroundTransparency = 1
+	self._infoName.Font = Enum.Font.GothamBold
+	self._infoName.TextSize = 18
+	self._infoName.TextXAlignment = Enum.TextXAlignment.Left
+	self._infoName.TextColor3 = ACCENT
+	self._infoName.Text = ""
+	self._infoName.Parent = info
+
+	self._infoStatus = Instance.new("TextLabel")
+	self._infoStatus.Position = UDim2.fromOffset(14, 40)
+	self._infoStatus.Size = UDim2.new(1, -28, 0, 30)
+	self._infoStatus.BackgroundTransparency = 1
+	self._infoStatus.Font = Enum.Font.Gotham
+	self._infoStatus.TextSize = 13
+	self._infoStatus.TextWrapped = true
+	self._infoStatus.TextXAlignment = Enum.TextXAlignment.Left
+	self._infoStatus.TextYAlignment = Enum.TextYAlignment.Top
+	self._infoStatus.TextColor3 = DIM
+	self._infoStatus.Text = ""
+	self._infoStatus.Parent = info
+
+	local hdr = Instance.new("TextLabel")
+	hdr.Position = UDim2.fromOffset(14, 76)
+	hdr.Size = UDim2.new(1, -28, 0, 16)
+	hdr.BackgroundTransparency = 1
+	hdr.Font = Enum.Font.GothamBold
+	hdr.TextSize = 12
+	hdr.TextXAlignment = Enum.TextXAlignment.Left
+	hdr.TextColor3 = Color3.fromRGB(120, 128, 140)
+	hdr.Text = "PARTS GRANTED"
+	hdr.Parent = info
+
+	local list = Instance.new("ScrollingFrame")
+	list.Position = UDim2.fromOffset(10, 96)
+	list.Size = UDim2.new(1, -20, 1, -148)
+	list.BackgroundTransparency = 1
+	list.BorderSizePixel = 0
+	list.ScrollBarThickness = 5
+	list.CanvasSize = UDim2.new()
+	list.AutomaticCanvasSize = Enum.AutomaticSize.Y
+	list.Parent = info
+	local ll = Instance.new("UIListLayout")
+	ll.Padding = UDim.new(0, 6)
+	ll.SortOrder = Enum.SortOrder.LayoutOrder
+	ll.Parent = list
+	self._infoParts = list
+	self._infoRows = {}
+
+	self._infoBtn = Instance.new("TextButton")
+	self._infoBtn.AnchorPoint = Vector2.new(0.5, 1)
+	self._infoBtn.Position = UDim2.new(0.5, 0, 1, -12)
+	self._infoBtn.Size = UDim2.new(1, -28, 0, 38)
+	self._infoBtn.BackgroundColor3 = GREY
+	self._infoBtn.BorderSizePixel = 0
+	self._infoBtn.Font = Enum.Font.GothamBold
+	self._infoBtn.TextSize = 15
+	self._infoBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+	self._infoBtn.Text = ""
+	corner(self._infoBtn, 8)
+	self._infoBtn.Parent = info
+	self._infoBtn.Activated:Connect(function()
+		if self._selectedNode then
+			self:_requestUnlock(self._selectedNode)
+		end
+	end)
+end
+
+-- Select a node: show its details on the right (and re-highlight it in the graph).
+function TechController:_selectNode(id)
+	if not id then
+		return
+	end
+	self._selectedNode = id
+	self:_refreshInfo()
+	self:_refreshTree()
+end
+
+function TechController:_refreshInfo()
+	if not self._infoName then
+		return
+	end
+	for _, c in ipairs(self._infoRows) do
+		c:Destroy()
+	end
+	self._infoRows = {}
+
+	local node = self._selectedNode and TechTree.nodeById(self._selectedNode)
+	if not node then
+		self._infoName.Text = "Select a node"
+		self._infoStatus.Text = ""
+		self._infoBtn.Visible = false
+		return
+	end
+	self._infoBtn.Visible = true
+
+	local unlocked = self._state.unlocked or {}
+	local isUnlocked = unlocked[node.id] == true
+	local available = (not isUnlocked) and TechTree.requiresMet(node, unlocked)
+	local sci = self:GetScience()
+	local SCI = Color3.fromRGB(150, 235, 170)
+
+	self._infoName.Text = node.name
+	if isUnlocked then
+		self._infoStatus.Text = "Researched"
+		self._infoStatus.TextColor3 = SCI
+	elseif available then
+		self._infoStatus.Text = (node.cost == 0) and "Available  •  Free"
+			or ("Available  •  costs %d science"):format(node.cost)
+		self._infoStatus.TextColor3 = (sci >= node.cost) and SCI or DIM
+	else
+		local reqNames = {}
+		for _, r in ipairs(node.requires) do
+			local rn = TechTree.nodeById(r)
+			reqNames[#reqNames + 1] = rn and rn.name or r
+		end
+		self._infoStatus.Text = "Locked  •  research " .. table.concat(reqNames, " or ") .. " first"
+		self._infoStatus.TextColor3 = DIM
+	end
+
+	for i, partId in ipairs(node.parts) do
+		local def = Catalog.get(partId)
+		if def then
+			self._infoRows[#self._infoRows + 1] = partRow(self._infoParts, def, i)
+		end
+	end
+
+	if isUnlocked then
+		self._infoBtn.Text = "Researched ✓"
+		self._infoBtn.BackgroundColor3 = Color3.fromRGB(40, 70, 52)
+		self._infoBtn.Active = false
+		self._infoBtn.AutoButtonColor = false
+	elseif available then
+		local afford = sci >= node.cost
+		self._infoBtn.Text = (node.cost == 0) and "Research (Free)" or ("Research  (%d)"):format(node.cost)
+		self._infoBtn.BackgroundColor3 = afford and GREEN or GREY
+		self._infoBtn.Active = afford
+		self._infoBtn.AutoButtonColor = afford
+	else
+		self._infoBtn.Text = "Locked"
+		self._infoBtn.BackgroundColor3 = GREY
+		self._infoBtn.Active = false
+		self._infoBtn.AutoButtonColor = false
+	end
 end
 
 -- Lay out the BRANCHING tech graph: one box per node placed on its (col,row) grid cell, each
@@ -333,7 +557,7 @@ function TechController:_buildGraph(parent)
 		corner(box, 8)
 		box.Parent = parent
 		box.Activated:Connect(function()
-			self:_requestUnlock(n.id)
+			self:_selectNode(n.id)
 		end)
 
 		local stroke = Instance.new("UIStroke")
@@ -417,6 +641,13 @@ function TechController:_refreshTree()
 				ui.stroke.Color = GREY
 				ui.status.Text = ("%d pts"):format(n.cost)
 				ui.status.TextColor3 = Color3.fromRGB(110, 116, 128)
+			end
+			-- The selected node gets a brighter, thicker outline.
+			if n.id == self._selectedNode then
+				ui.stroke.Thickness = 3.5
+				ui.stroke.Color = Color3.fromRGB(255, 255, 255)
+			else
+				ui.stroke.Thickness = 2
 			end
 		end
 		-- Incoming edge(s) light up green once this node is researched (the path was taken).
