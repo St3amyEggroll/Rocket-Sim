@@ -20,6 +20,7 @@ local systemsFolder = script:WaitForChild("Systems")
 local initOrder = {
 	"TerrainController",
 	"GameModeController",
+	"TechController",
 	"VehicleController",
 	"FloatingOriginController",
 	"InputController",
@@ -47,6 +48,7 @@ local initOrder = {
 local startOrder = {
 	"TerrainController",
 	"GameModeController",
+	"TechController",
 	"VehicleController",
 	"FloatingOriginController",
 	"InputController",

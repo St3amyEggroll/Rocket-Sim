@@ -101,6 +101,7 @@ function VABController:Start()
 	self._mode = Registry:Get("GameModeController")
 	self._origin = Registry:Get("FloatingOriginController")
 	self._flight = Registry:Get("FlightController")
+	self._tech = Registry:Get("TechController")
 	local player = Players.LocalPlayer
 
 	self:_build(player:WaitForChild("PlayerGui"))
@@ -109,6 +110,12 @@ function VABController:Start()
 	self._vehicle.Changed:Connect(function()
 		self:_refresh()
 	end)
+	-- Re-render the palette when tech unlocks change (parts appear as you progress).
+	if self._tech then
+		self._tech.Changed:Connect(function()
+			self:_renderPalette()
+		end)
+	end
 	self._mode.ModeChanged:Connect(function(m)
 		local vab = (m == "VAB")
 		self._gui.Enabled = vab
@@ -286,7 +293,9 @@ function VABController:_renderPalette()
 	local order = 0
 	for _, id in ipairs(Catalog.order) do
 		local def = Catalog.get(id)
-		if def.category == self._activeCat then
+		-- Only show parts in the active category that tech has unlocked.
+		local unlocked = (not self._tech) or self._tech:IsPartUnlocked(id)
+		if def.category == self._activeCat and unlocked then
 			order += 1
 			self:_addPartTile(def, id, order)
 		end
