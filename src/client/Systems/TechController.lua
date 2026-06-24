@@ -17,6 +17,8 @@ local Config = require(Shared:WaitForChild("Config"))
 local Registry = require(Shared:WaitForChild("Registry"))
 local Signal = require(Shared:WaitForChild("Signal"))
 local TechTree = require(Shared:WaitForChild("TechTree"))
+local Catalog = require(Shared:WaitForChild("PartCatalog"))
+local PartPreview = require(Shared:WaitForChild("PartPreview"))
 
 local TechController = {}
 
@@ -175,11 +177,13 @@ function TechController:_buildUI()
 	self._toastToken = 0
 
 	-- RESEARCH area (its own screen, opened by the nav bar's Research tab -> mode "Research"):
-	-- a dim full-screen backdrop with the tech-tree panel.
+	-- a KSP-style tech-tree GRAPH -- part-icon nodes laid out in columns by tier, each tier
+	-- wired back to the previous one with a right-angle bus connector, over a dark backdrop.
 	local gui = Instance.new("ScreenGui")
 	gui.Name = "ResearchGui"
 	gui.ResetOnSpawn = false
 	gui.IgnoreGuiInset = true
+	gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 	gui.DisplayOrder = 55
 	gui.Enabled = false
 	gui.Parent = pg
@@ -188,15 +192,15 @@ function TechController:_buildUI()
 	local backdrop = Instance.new("Frame")
 	backdrop.Size = UDim2.fromScale(1, 1)
 	backdrop.BackgroundColor3 = Color3.fromRGB(8, 10, 16)
-	backdrop.BackgroundTransparency = 0.25
+	backdrop.BackgroundTransparency = 0.15
 	backdrop.BorderSizePixel = 0
 	backdrop.Parent = gui
 
 	local panel = Instance.new("Frame")
 	panel.AnchorPoint = Vector2.new(0.5, 0.5)
 	panel.Position = UDim2.fromScale(0.5, 0.5)
-	panel.Size = UDim2.fromOffset(460, 520)
-	panel.BackgroundColor3 = BG
+	panel.Size = UDim2.new(0.95, 0, 0.9, 0)
+	panel.BackgroundColor3 = Color3.fromRGB(12, 16, 22)
 	panel.BackgroundTransparency = 0.05
 	panel.BorderSizePixel = 0
 	corner(panel, 12)
@@ -204,11 +208,11 @@ function TechController:_buildUI()
 	self._panel = panel
 
 	local title = Instance.new("TextLabel")
-	title.Position = UDim2.fromOffset(16, 12)
-	title.Size = UDim2.new(1, -200, 0, 24)
+	title.Position = UDim2.fromOffset(18, 12)
+	title.Size = UDim2.fromOffset(260, 26)
 	title.BackgroundTransparency = 1
 	title.Font = Enum.Font.GothamBold
-	title.TextSize = 18
+	title.TextSize = 20
 	title.TextXAlignment = Enum.TextXAlignment.Left
 	title.TextColor3 = ACCENT
 	title.Text = "RESEARCH"
@@ -216,24 +220,24 @@ function TechController:_buildUI()
 
 	self._sciLabel = Instance.new("TextLabel")
 	self._sciLabel.AnchorPoint = Vector2.new(1, 0)
-	self._sciLabel.Position = UDim2.new(1, -16, 0, 14)
-	self._sciLabel.Size = UDim2.fromOffset(180, 20)
+	self._sciLabel.Position = UDim2.new(1, -150, 0, 14)
+	self._sciLabel.Size = UDim2.fromOffset(220, 22)
 	self._sciLabel.BackgroundTransparency = 1
 	self._sciLabel.Font = Enum.Font.GothamBold
-	self._sciLabel.TextSize = 15
+	self._sciLabel.TextSize = 16
 	self._sciLabel.TextXAlignment = Enum.TextXAlignment.Right
 	self._sciLabel.TextColor3 = Color3.fromRGB(150, 235, 170)
 	self._sciLabel.Text = "Science: 0"
 	self._sciLabel.Parent = panel
 
 	local back = Instance.new("TextButton")
-	back.AnchorPoint = Vector2.new(0.5, 1)
-	back.Position = UDim2.new(0.5, 0, 1, -12)
-	back.Size = UDim2.fromOffset(180, 30)
+	back.AnchorPoint = Vector2.new(1, 0)
+	back.Position = UDim2.new(1, -16, 0, 12)
+	back.Size = UDim2.fromOffset(120, 28)
 	back.BackgroundColor3 = ROW
 	back.BorderSizePixel = 0
 	back.Font = Enum.Font.GothamBold
-	back.TextSize = 14
+	back.TextSize = 13
 	back.TextColor3 = TEXT
 	back.Text = "Back to Build"
 	corner(back, 6)
@@ -242,70 +246,168 @@ function TechController:_buildUI()
 		self._mode:SetMode("VAB")
 	end)
 
-	local list = Instance.new("Frame")
-	list.Position = UDim2.fromOffset(14, 46)
-	list.Size = UDim2.new(1, -28, 1, -98)
-	list.BackgroundTransparency = 1
-	list.Parent = panel
-	local layout = Instance.new("UIListLayout")
-	layout.Padding = UDim.new(0, 6)
-	layout.SortOrder = Enum.SortOrder.LayoutOrder
-	layout.Parent = list
+	-- Scrollable graph canvas (the tree can be wider/taller than the panel).
+	local graph = Instance.new("ScrollingFrame")
+	graph.Position = UDim2.fromOffset(12, 48)
+	graph.Size = UDim2.new(1, -24, 1, -60)
+	graph.BackgroundColor3 = Color3.fromRGB(9, 12, 18)
+	graph.BackgroundTransparency = 0.2
+	graph.BorderSizePixel = 0
+	graph.ScrollBarThickness = 6
+	graph.ScrollingDirection = Enum.ScrollingDirection.XY
+	graph.CanvasSize = UDim2.new()
+	corner(graph, 10)
+	graph.Parent = panel
 
-	self._tierRows = {}
+	self:_buildGraph(graph)
+	self:_refreshTree()
+end
+
+-- Lay out the tech tree as a node graph: one column per tier, each part a small icon node,
+-- columns wired to the previous tier by a vertical bus + horizontal stubs (KSP style). Stores
+-- per-tier node strokes / unlock chips / connector frames so _refreshTree can recolour them.
+function TechController:_buildGraph(parent)
+	local NODE = 58
+	local COL_W = 150
+	local ROW_H = 74
+	local PAD_X = 46
+	local PAD_TOP = 68
+
+	local nTiers = #TechTree.tiers
+	local maxRows = 1
+	for _, tier in ipairs(TechTree.tiers) do
+		maxRows = math.max(maxRows, #tier.parts)
+	end
+	parent.CanvasSize = UDim2.fromOffset(PAD_X * 2 + (nTiers - 1) * COL_W + NODE, PAD_TOP + maxRows * ROW_H + 30)
+
+	local function colX(i)
+		return PAD_X + (i - 1) * COL_W
+	end
+	local function colStartY(n)
+		return PAD_TOP + (maxRows - n) * ROW_H / 2
+	end
+
+	-- Node centres per tier (used to wire the connectors).
+	local centres = {}
 	for i, tier in ipairs(TechTree.tiers) do
-		local row = Instance.new("Frame")
-		row.Size = UDim2.new(1, 0, 0, 64)
-		row.BackgroundColor3 = ROW
-		row.BorderSizePixel = 0
-		row.LayoutOrder = i
-		corner(row, 8)
-		row.Parent = list
+		local n = #tier.parts
+		local sy, x, cs = colStartY(n), colX(i), {}
+		for j = 1, n do
+			local y = sy + (j - 1) * ROW_H
+			cs[j] = { x = x, y = y, cy = y + NODE / 2 }
+		end
+		centres[i] = cs
+	end
 
-		local name = Instance.new("TextLabel")
-		name.Position = UDim2.fromOffset(12, 8)
-		name.Size = UDim2.new(1, -150, 0, 18)
-		name.BackgroundTransparency = 1
-		name.Font = Enum.Font.GothamBold
-		name.TextSize = 15
-		name.TextXAlignment = Enum.TextXAlignment.Left
-		name.TextColor3 = TEXT
-		name.Text = tier.name
-		name.Parent = row
+	-- Thin line segment helper (a Frame). Connectors are drawn first so nodes sit on top.
+	local function seg(x, y, w, h)
+		local f = Instance.new("Frame")
+		f.Position = UDim2.fromOffset(math.floor(x), math.floor(y))
+		f.Size = UDim2.fromOffset(math.max(2, math.floor(w)), math.max(2, math.floor(h)))
+		f.BackgroundColor3 = Color3.fromRGB(48, 60, 54)
+		f.BorderSizePixel = 0
+		f.ZIndex = 1
+		f.Parent = parent
+		return f
+	end
 
-		local parts = Instance.new("TextLabel")
-		parts.Position = UDim2.fromOffset(12, 30)
-		parts.Size = UDim2.new(1, -150, 0, 28)
-		parts.BackgroundTransparency = 1
-		parts.Font = Enum.Font.Code
-		parts.TextSize = 12
-		parts.TextWrapped = true
-		parts.TextXAlignment = Enum.TextXAlignment.Left
-		parts.TextYAlignment = Enum.TextYAlignment.Top
-		parts.TextColor3 = DIM
-		parts.Text = table.concat(tier.parts, ", ")
-		parts.Parent = row
+	self._tierConns = {}
+	for i = 2, nTiers do
+		local leftRight = colX(i - 1) + NODE -- right edge of the previous column
+		local rightLeft = colX(i) -- left edge of this column
+		local railX = (leftRight + rightLeft) / 2
+		local conns, minY, maxY = {}, math.huge, -math.huge
+		for _, c in ipairs(centres[i - 1]) do
+			conns[#conns + 1] = seg(leftRight, c.cy - 1, railX - leftRight, 2)
+			minY, maxY = math.min(minY, c.cy), math.max(maxY, c.cy)
+		end
+		for _, c in ipairs(centres[i]) do
+			conns[#conns + 1] = seg(railX, c.cy - 1, rightLeft - railX, 2)
+			minY, maxY = math.min(minY, c.cy), math.max(maxY, c.cy)
+		end
+		conns[#conns + 1] = seg(railX - 1, minY, 2, maxY - minY) -- vertical bus
+		self._tierConns[i] = conns
+	end
 
-		local btn = Instance.new("TextButton")
-		btn.AnchorPoint = Vector2.new(1, 0.5)
-		btn.Position = UDim2.new(1, -12, 0.5, 0)
-		btn.Size = UDim2.fromOffset(116, 32)
-		btn.BackgroundColor3 = GREY
-		btn.BorderSizePixel = 0
-		btn.Font = Enum.Font.GothamBold
-		btn.TextSize = 13
-		btn.TextColor3 = Color3.fromRGB(255, 255, 255)
-		btn.Text = "LOCKED"
-		corner(btn, 6)
-		btn.Parent = row
-		btn.Activated:Connect(function()
+	self._tierNodes = {}
+	for i, tier in ipairs(TechTree.tiers) do
+		local x = colX(i)
+		local headerX = x - (COL_W - NODE) / 2
+
+		local hdr = Instance.new("TextLabel")
+		hdr.Position = UDim2.fromOffset(headerX, 8)
+		hdr.Size = UDim2.fromOffset(COL_W, 18)
+		hdr.BackgroundTransparency = 1
+		hdr.Font = Enum.Font.GothamBold
+		hdr.TextSize = 13
+		hdr.TextColor3 = TEXT
+		hdr.Text = tier.name
+		hdr.ZIndex = 2
+		hdr.Parent = parent
+
+		local chip = Instance.new("TextButton")
+		chip.Position = UDim2.fromOffset(headerX + (COL_W - 96) / 2, 30)
+		chip.Size = UDim2.fromOffset(96, 22)
+		chip.BackgroundColor3 = GREY
+		chip.BorderSizePixel = 0
+		chip.Font = Enum.Font.GothamBold
+		chip.TextSize = 12
+		chip.TextColor3 = Color3.fromRGB(255, 255, 255)
+		chip.Text = "LOCKED"
+		chip.ZIndex = 2
+		corner(chip, 6)
+		chip.Parent = parent
+		chip.Activated:Connect(function()
 			self:_requestUnlock(tier.id)
 		end)
 
-		self._tierRows[i] = { row = row, btn = btn }
-	end
+		local strokes = {}
+		for j, partId in ipairs(tier.parts) do
+			local def = Catalog.get(partId)
+			local c = centres[i][j]
 
-	self:_refreshTree()
+			local node = Instance.new("TextButton")
+			node.Position = UDim2.fromOffset(c.x, c.y)
+			node.Size = UDim2.fromOffset(NODE, NODE)
+			node.BackgroundColor3 = Color3.fromRGB(20, 26, 22)
+			node.AutoButtonColor = true
+			node.BorderSizePixel = 0
+			node.Text = ""
+			node.ZIndex = 2
+			corner(node, 8)
+			node.Parent = parent
+			node.Activated:Connect(function()
+				self:_requestUnlock(tier.id)
+			end)
+
+			local stroke = Instance.new("UIStroke")
+			stroke.Thickness = 2
+			stroke.Color = GREY
+			stroke.Parent = node
+			strokes[#strokes + 1] = stroke
+
+			if def then
+				local thumb = PartPreview.thumbnail(def)
+				thumb.Size = UDim2.fromOffset(NODE - 10, NODE - 10)
+				thumb.Position = UDim2.fromOffset(5, 5)
+				thumb.ZIndex = 3
+				thumb.Parent = node
+			else
+				local lbl = Instance.new("TextLabel")
+				lbl.Size = UDim2.fromScale(1, 1)
+				lbl.BackgroundTransparency = 1
+				lbl.Font = Enum.Font.Code
+				lbl.TextSize = 9
+				lbl.TextWrapped = true
+				lbl.TextColor3 = DIM
+				lbl.Text = partId
+				lbl.ZIndex = 3
+				lbl.Parent = node
+			end
+		end
+
+		self._tierNodes[i] = { strokes = strokes, chip = chip }
+	end
 end
 
 function TechController:_setResearchVisible(v)
@@ -315,35 +417,48 @@ function TechController:_setResearchVisible(v)
 end
 
 function TechController:_refreshTree()
-	if not self._tierRows then
+	if not self._tierNodes then
 		return
 	end
 	local sci = self:GetScience()
 	if self._sciLabel then
 		self._sciLabel.Text = ("Science: %d"):format(sci)
 	end
+	local LINE_ON = Color3.fromRGB(80, 200, 120)
+	local LINE_OFF = Color3.fromRGB(48, 60, 54)
 	for i, tier in ipairs(TechTree.tiers) do
-		local r = self._tierRows[i]
-		if r then
+		local t = self._tierNodes[i]
+		if t then
 			local unlocked = self._state.unlocked[tier.id]
 			local prev = TechTree.prevTierId(tier.id)
 			local available = (not unlocked) and (not prev or self._state.unlocked[prev])
+
+			local strokeColor, chipColor, chipText, chipActive
 			if unlocked then
-				r.btn.Text = "UNLOCKED"
-				r.btn.BackgroundColor3 = GREEN
-				r.btn.AutoButtonColor = false
-				r.btn.Active = false
+				strokeColor, chipColor, chipText, chipActive = GREEN, GREEN, "UNLOCKED", false
 			elseif available then
 				local afford = sci >= tier.cost
-				r.btn.Text = ("Unlock (%d)"):format(tier.cost)
-				r.btn.BackgroundColor3 = afford and GREEN or GREY
-				r.btn.AutoButtonColor = afford
-				r.btn.Active = afford
+				strokeColor = ACCENT
+				chipColor = afford and GREEN or GREY
+				chipText = (tier.cost == 0) and "FREE" or ("Unlock %d"):format(tier.cost)
+				chipActive = afford
 			else
-				r.btn.Text = "LOCKED"
-				r.btn.BackgroundColor3 = GREY
-				r.btn.AutoButtonColor = false
-				r.btn.Active = false
+				strokeColor, chipColor, chipText, chipActive = GREY, GREY, ("Locked  %d"):format(tier.cost), false
+			end
+
+			for _, s in ipairs(t.strokes) do
+				s.Color = strokeColor
+			end
+			t.chip.Text = chipText
+			t.chip.BackgroundColor3 = chipColor
+			t.chip.AutoButtonColor = chipActive
+			t.chip.Active = chipActive
+
+			-- Colour the bus that feeds this tier green once it's unlocked.
+			if self._tierConns and self._tierConns[i] then
+				for _, f in ipairs(self._tierConns[i]) do
+					f.BackgroundColor3 = unlocked and LINE_ON or LINE_OFF
+				end
 			end
 		end
 	end

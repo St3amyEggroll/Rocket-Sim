@@ -171,17 +171,17 @@ function VABController:_build(parentGui)
 	self:_buildTools(gui)
 end
 
--- Snap-mode + symmetry toggles (top centre, under the title).
+-- Snap-mode + symmetry toggles (bottom-left corner).
 function VABController:_buildTools(gui)
 	local frame = Instance.new("Frame")
-	frame.AnchorPoint = Vector2.new(0.5, 0)
-	frame.Position = UDim2.new(0.5, 0, 0, 46)
+	frame.AnchorPoint = Vector2.new(0, 1)
+	frame.Position = UDim2.new(0, 16, 1, -16)
 	frame.Size = UDim2.fromOffset(320, 32)
 	frame.BackgroundTransparency = 1
 	frame.Parent = gui
 	local layout = Instance.new("UIListLayout")
 	layout.FillDirection = Enum.FillDirection.Horizontal
-	layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+	layout.HorizontalAlignment = Enum.HorizontalAlignment.Left
 	layout.Padding = UDim.new(0, 8)
 	layout.Parent = frame
 
@@ -405,8 +405,8 @@ end
 
 function VABController:_buildControls(gui)
 	local launch = Instance.new("TextButton")
-	launch.AnchorPoint = Vector2.new(0.5, 1)
-	launch.Position = UDim2.new(0.5, -90, 1, -16)
+	launch.AnchorPoint = Vector2.new(1, 1)
+	launch.Position = UDim2.new(1, -16, 1, -16)
 	launch.Size = UDim2.fromOffset(220, 50)
 	launch.BackgroundColor3 = Color3.fromRGB(60, 170, 90)
 	launch.BorderSizePixel = 0
@@ -422,8 +422,8 @@ function VABController:_buildControls(gui)
 	end)
 
 	local clear = Instance.new("TextButton")
-	clear.AnchorPoint = Vector2.new(0.5, 1)
-	clear.Position = UDim2.new(0.5, 100, 1, -16)
+	clear.AnchorPoint = Vector2.new(1, 1)
+	clear.Position = UDim2.new(1, -248, 1, -16)
 	clear.Size = UDim2.fromOffset(130, 50)
 	clear.BackgroundColor3 = Color3.fromRGB(120, 60, 60)
 	clear.BorderSizePixel = 0
