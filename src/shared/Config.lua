@@ -258,10 +258,13 @@ Config.CAMERA = {
 	-- Map zoom now scales the SCHEMATIC CONTENT (the camera stays at a fixed, render-safe
 	-- distance). The range is wide so you can zoom from a local orbit out to the whole
 	-- Sun/Terra/Mun system; the actual view radius is clamped to sane bounds in MapView.
-	-- Orbital camera: above its body's threshold altitude the camera locks to the orbital
-	-- plane (up = orbit normal); below it stays planet-down. Blended over orbitCamBand studs.
-	orbitCamBand = 4000,
+	-- Orbital camera: above its body's threshold altitude the camera LEVELS with the orbital
+	-- plane (up = orbit normal) and HOLDS a fixed heading -- it does NOT swing to follow your
+	-- prograde as you coast. Below it stays planet-down for launch/landing. orbitCamBand is the
+	-- altitude over which it blends (threshold + band = fully level).
+	orbitCamAltPlanet = 1200, -- Terra: fully level with the orbit by ~2k (1200 + 800)
 	orbitCamAltMoon = 1200, -- the airless Mun has no atmosphere to key off, so use a fixed alt
+	orbitCamBand = 800,
 	mapZoomMin = 0.25,
 	mapZoomMax = 140,
 	-- Fixed map camera distance = frameSize * this. Kept so the whole schematic (content is

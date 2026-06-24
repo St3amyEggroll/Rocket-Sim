@@ -180,38 +180,86 @@ function VehicleController:_findKeepRoot()
 	return bi or (parts[1] and 1 or nil)
 end
 
--- Assign each actuator a stage. While auto (the player hasn't touched staging) the
--- stages track the build, bottom -> top. Once edited, existing stages are preserved
--- and only brand-new actuators get a sensible default.
+-- The symmetry id a part belongs to: its own, or the nearest ancestor's (so a child of a
+-- symmetrically-placed unit -- e.g. the engine under a mirrored radial decoupler -- counts
+-- as part of that symmetry family). nil if it isn't in any symmetry group.
+function VehicleController:_symAncestorId(index)
+	local p = self._parts[index]
+	local guard = 0
+	while p and guard < 4096 do
+		if p.symId then
+			return p.symId
+		end
+		if not p.parent then
+			break
+		end
+		p = self._parts[p.parent]
+		guard += 1
+	end
+	return nil
+end
+
+-- Assign each actuator a stage. Actuators placed together with radial symmetry are GROUPED
+-- onto one stage (corresponding copies share a key = symmetry id + part id), so a pair of
+-- mirrored boosters fires as one stage instead of two. While auto (the player hasn't touched
+-- staging) groups track the build bottom -> top; once edited, existing stages are preserved
+-- and only brand-new actuators get a sensible default (a new copy joins its siblings' stage).
 function VehicleController:_assignStages()
 	local parts = self._parts
-	local acts = {}
+
+	local groups, order = {}, {}
 	for i, p in ipairs(parts) do
 		if isActuator(p.def) then
-			acts[#acts + 1] = { i = i, y = self:_partBottom(p) }
+			local symA = self:_symAncestorId(i)
+			local key = symA and ("S" .. symA .. "|" .. tostring(p.id)) or ("U" .. i)
+			local g = groups[key]
+			if not g then
+				g = { y = self:_partBottom(p), minI = i, members = {} }
+				groups[key] = g
+				order[#order + 1] = g
+			end
+			g.members[#g.members + 1] = i
+			g.y = math.min(g.y, self:_partBottom(p))
+			g.minI = math.min(g.minI, i)
 		end
 	end
-	table.sort(acts, function(a, b)
+	-- Bottom -> top, tie-broken by first part index for a stable order.
+	table.sort(order, function(a, b)
 		if a.y == b.y then
-			return a.i < b.i
+			return a.minI < b.minI
 		end
 		return a.y < b.y
 	end)
 
 	if self._autoStage then
-		for rank, a in ipairs(acts) do
-			parts[a.i].stage = rank
+		for rank, g in ipairs(order) do
+			for _, idx in ipairs(g.members) do
+				parts[idx].stage = rank
+			end
 		end
 	else
-		for _, a in ipairs(acts) do
-			if not parts[a.i].stage then
-				local rank = 1
-				for _, b in ipairs(acts) do
-					if b.y < a.y then
-						rank += 1
-					end
+		for _, g in ipairs(order) do
+			-- Keep a symmetry group together: a new copy inherits a sibling's stage if set.
+			local existing
+			for _, idx in ipairs(g.members) do
+				if parts[idx].stage then
+					existing = parts[idx].stage
+					break
 				end
-				parts[a.i].stage = rank
+			end
+			for _, idx in ipairs(g.members) do
+				if not parts[idx].stage then
+					if not existing then
+						local rank = 1
+						for _, h in ipairs(order) do
+							if h.y < g.y then
+								rank += 1
+							end
+						end
+						existing = rank
+					end
+					parts[idx].stage = existing
+				end
 			end
 		end
 	end

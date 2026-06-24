@@ -70,7 +70,7 @@ function CameraController:_orbitCamAlt(bodyId)
 	elseif bodyId == "sun" then
 		return 0
 	end
-	return Config.ATMOSPHERE.top
+	return Config.CAMERA.orbitCamAltPlanet
 end
 
 function CameraController:_update(state, info)
@@ -176,8 +176,10 @@ function CameraController:_update(state, info)
 	if hv.Magnitude > 6 and hv.Magnitude > v3.Magnitude * 0.12 then
 		desired = hv.Unit
 	end
-	-- Ease toward the desired heading so a gravity turn pans smoothly instead of snapping.
-	local fwd = last:Lerp(desired, 0.1)
+	-- Ease toward the velocity heading only while planet-down (surface/ascent); once level with
+	-- the orbit, HOLD the heading fixed (follow fades to 0 with orbT) so the camera does not
+	-- swing to track prograde as you coast -- it stays level and you orbit it manually (RMB).
+	local fwd = last:Lerp(desired, 0.1 * (1 - orbT))
 	fwd = horizOf(fwd)
 	fwd = (fwd.Magnitude > 1e-3) and fwd.Unit or desired
 	self._lastFwd = fwd
