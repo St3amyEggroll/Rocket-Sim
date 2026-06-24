@@ -352,6 +352,56 @@ function CraftRenderer:_rebuildCraft()
 	self._reentryGlow = glow
 	self._chute = canopy
 	self._exploded = false
+
+	-- Build aids (VAB only): centre-of-mass / thrust / lift markers, so you can see why a
+	-- design is stable or flips. The flight model treats aero drag as acting on the thrust
+	-- axis, so CoM and CoL share that axis and only their HEIGHT differs: CoL below CoM
+	-- (toward the base) is stable; CoL above CoM (toward the nose) weathervanes -> it flips.
+	self._indicators = {}
+	local function makeMarker(name, color, pos, hidden)
+		local mk = makePart(model, name, {
+			Shape = Enum.PartType.Ball,
+			Size = Vector3.new(4.5, 4.5, 4.5),
+			Color = color,
+			Material = Enum.Material.Neon,
+			Transparency = 1, -- shown only in the VAB (toggled in _render)
+			CFrame = CFrame.new(pos),
+		})
+		mk:SetAttribute("hidden", hidden or false)
+		local bb = Instance.new("BillboardGui")
+		bb.Size = UDim2.fromOffset(42, 15)
+		bb.AlwaysOnTop = true
+		bb.Enabled = false
+		bb.Adornee = mk
+		local lbl = Instance.new("TextLabel")
+		lbl.Size = UDim2.fromScale(1, 1)
+		lbl.BackgroundTransparency = 1
+		lbl.Font = Enum.Font.GothamBold
+		lbl.TextSize = 13
+		lbl.TextStrokeTransparency = 0.3
+		lbl.TextColor3 = color
+		lbl.Text = name
+		lbl.Parent = bb
+		bb.Parent = mk
+		self._indicators[#self._indicators + 1] = mk
+		return mk
+	end
+
+	local comPos = Vector3.new(prof.comX or 0, (prof.base or 0) + (prof.com or 0), prof.comZ or 0)
+	local colPos = Vector3.new(prof.comX or 0, (prof.base or 0) + (prof.cop or 0), prof.comZ or 0)
+	makeMarker("CoM", Color3.fromRGB(255, 210, 40), comPos) -- yellow
+	makeMarker("CoL", Color3.fromRGB(70, 150, 255), colPos) -- blue
+	-- Centre of thrust: thrust-weighted engine position (hidden when there are no engines).
+	local tSum, tx, ty, tz = 0, 0, 0, 0
+	for _, e in ipairs(layout) do
+		local th = e.def.thrust or 0
+		if th > 0 then
+			tSum += th
+			tx, ty, tz = tx + th * e.cf.X, ty + th * e.cf.Y, tz + th * e.cf.Z
+		end
+	end
+	local cotPos = (tSum > 0) and Vector3.new(tx / tSum, ty / tSum, tz / tSum) or comPos
+	makeMarker("CoT", Color3.fromRGB(225, 80, 255), cotPos, tSum <= 0) -- magenta
 end
 
 -- Blow the craft apart on a crash: every part becomes physics debris flung by the
@@ -429,6 +479,19 @@ function CraftRenderer:_render(state, info)
 		-- Flight: map the assembly's base (CoM on the thrust axis) onto the craft position.
 		local off = self._vehicle:GetFlightOffset()
 		self._craft:PivotTo(pointCFrame(craftRender, up) * CFrame.new(-off))
+	end
+
+	-- Build-aid markers (CoM/CoT/CoL): only while editing in the VAB.
+	if self._indicators then
+		local inVAB = info and info.mode == "VAB"
+		for _, mk in ipairs(self._indicators) do
+			local show = inVAB and not mk:GetAttribute("hidden")
+			mk.Transparency = show and 0.35 or 1
+			local bb = mk:FindFirstChildOfClass("BillboardGui")
+			if bb then
+				bb.Enabled = show
+			end
+		end
 	end
 
 	local throttle = (info and info.throttle) or 0
