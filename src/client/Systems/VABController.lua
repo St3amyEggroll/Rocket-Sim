@@ -124,8 +124,6 @@ function VABController:Start()
 	UserInputService.InputEnded:Connect(function(input)
 		if input.UserInputType == Enum.UserInputType.MouseButton1 and self._drag then
 			self:_onRelease()
-		elseif input.UserInputType == Enum.UserInputType.MouseButton2 then
-			self:_onRmbEnd()
 		end
 	end)
 	RunService:BindToRenderStep("RocketSim_VAB", Enum.RenderPriority.Camera.Value + 1, function()
@@ -162,7 +160,6 @@ function VABController:_build(parentGui)
 
 	self:_buildPalette(gui)
 	self:_buildRight(gui)
-	self:_buildTweaks(gui)
 	self:_buildControls(gui)
 	self:_buildTools(gui)
 end
@@ -395,117 +392,6 @@ function VABController:_buildRight(gui)
 	self._craftLabel.TextColor3 = TEXT
 	self._craftLabel.Text = ""
 	self._craftLabel.Parent = pane
-end
-
--- A small TWEAKS panel (left of PART) shown only when a tweakable part is right-clicked:
--- fuel %, thrust limit, ejection force. Rows show/repack by the selected part's type.
-function VABController:_buildTweaks(gui)
-	local pane = panel(gui, UDim2.new(1, -594, 0, 56), UDim2.fromOffset(248, 150), "TWEAKS")
-	pane.Visible = false
-	self._tweakPane = pane
-
-	local function makeRow(name)
-		local r = Instance.new("Frame")
-		r.Size = UDim2.new(1, -24, 0, 28)
-		r.Position = UDim2.fromOffset(12, 40)
-		r.BackgroundTransparency = 1
-		r.Visible = false
-		r.Parent = pane
-		local function stepBtn(text, anchorRight)
-			local b = Instance.new("TextButton")
-			b.Size = UDim2.fromOffset(26, 26)
-			b.AnchorPoint = anchorRight and Vector2.new(1, 0) or Vector2.new(0, 0)
-			b.Position = anchorRight and UDim2.new(1, 0, 0, 1) or UDim2.fromOffset(0, 1)
-			b.BackgroundColor3 = ROW
-			b.BorderSizePixel = 0
-			b.Font = Enum.Font.GothamBold
-			b.TextSize = 18
-			b.TextColor3 = TEXT
-			b.Text = text
-			b.Parent = r
-			corner(b, 6)
-			return b
-		end
-		local minus = stepBtn("-", false)
-		local plus = stepBtn("+", true)
-		local val = Instance.new("TextLabel")
-		val.Size = UDim2.new(1, -64, 1, 0)
-		val.Position = UDim2.fromOffset(30, 0)
-		val.BackgroundTransparency = 1
-		val.Font = Enum.Font.Code
-		val.TextSize = 14
-		val.TextColor3 = TEXT
-		val.Text = name
-		val.Parent = r
-		return { row = r, value = val, minus = minus, plus = plus }
-	end
-
-	local rows = { fuel = makeRow("Fuel"), thrust = makeRow("Thrust"), eject = makeRow("Eject") }
-	self._tweakRows = rows
-	for kind, row in pairs(rows) do
-		row.minus.Activated:Connect(function()
-			self:_adjustTweak(kind, -1)
-		end)
-		row.plus.Activated:Connect(function()
-			self:_adjustTweak(kind, 1)
-		end)
-	end
-end
-
-function VABController:_adjustTweak(kind, dir)
-	local i = self._selected
-	if not i then
-		return
-	end
-	local t = self._vehicle:GetPartTweaks(i)
-	if not t then
-		return
-	end
-	if kind == "fuel" then
-		self._vehicle:SetPartFuelFrac(i, (t.fuelFrac or 1) + dir * 0.1)
-	elseif kind == "thrust" then
-		self._vehicle:SetPartThrustLimit(i, (t.thrustLimit or 1) + dir * 0.1)
-	elseif kind == "eject" then
-		self._vehicle:SetPartEjectForce(i, (t.ejectForce or 1) + dir * 0.25)
-	end
-	self:_updatePartPanel()
-end
-
-function VABController:_updateTweaks()
-	local pane = self._tweakPane
-	if not pane then
-		return
-	end
-	local i = (not self._drag) and self._selected or nil
-	local p = i and self._vehicle:GetParts()[i]
-	if not p then
-		pane.Visible = false
-		return
-	end
-	local def, t = p.def, self._vehicle:GetPartTweaks(i)
-	local rows = self._tweakRows
-	rows.fuel.row.Visible = def.fuel ~= nil
-	if def.fuel then
-		rows.fuel.value.Text = string.format("Fuel  %d%%", math.floor((t.fuelFrac or 1) * 100 + 0.5))
-	end
-	rows.thrust.row.Visible = def.category == "engine"
-	if def.category == "engine" then
-		rows.thrust.value.Text = string.format("Thrust  %d%%", math.floor((t.thrustLimit or 1) * 100 + 0.5))
-	end
-	rows.eject.row.Visible = def.decoupler == true
-	if def.decoupler then
-		rows.eject.value.Text = string.format("Eject  x%.2f", t.ejectForce or 1)
-	end
-	-- Repack visible rows so hidden ones leave no gap.
-	local slot = 0
-	for _, key in ipairs({ "fuel", "thrust", "eject" }) do
-		local r = rows[key].row
-		if r.Visible then
-			r.Position = UDim2.fromOffset(12, 40 + slot * 32)
-			slot += 1
-		end
-	end
-	pane.Visible = slot > 0
 end
 
 function VABController:_buildControls(gui)
@@ -912,12 +798,11 @@ function VABController:_updateGhost()
 	end
 end
 
--- Raycast under the cursor and return the design index of the craft part hit (or nil).
-function VABController:_pickIndex()
+function VABController:_tryPickup()
 	local cam = Workspace.CurrentCamera
 	local craft = Workspace:FindFirstChild("Craft")
 	if not cam or not craft then
-		return nil
+		return
 	end
 	local m = UserInputService:GetMouseLocation()
 	local ray = cam:ViewportPointToRay(m.X, m.Y)
@@ -926,33 +811,11 @@ function VABController:_pickIndex()
 	params.FilterDescendantsInstances = { craft }
 	local result = Workspace:Raycast(ray.Origin, ray.Direction * 8000, params)
 	if result and result.Instance then
-		return result.Instance:GetAttribute("idx")
+		local idx = result.Instance:GetAttribute("idx")
+		if idx then
+			self:_beginDragExisting(idx)
+		end
 	end
-	return nil
-end
-
-function VABController:_tryPickup()
-	local idx = self:_pickIndex()
-	if idx then
-		self:_beginDragExisting(idx)
-	end
-end
-
--- Right-click: a CLICK on a part (no drag) selects it + opens its tweaks; a right-DRAG is
--- left to orbit the camera (so the two don't fight). We record the down hit + position and
--- decide on release based on how far the mouse moved.
-function VABController:_onRmbEnd()
-	local start, hit = self._rmbStart, self._rmbHit
-	self._rmbStart, self._rmbHit = nil, nil
-	if not start or not hit or self._drag or self._mode:GetMode() ~= "VAB" then
-		return
-	end
-	local now = UserInputService:GetMouseLocation()
-	if (now - start).Magnitude > 6 then
-		return -- it was a drag (camera orbit), not a click
-	end
-	self._selected = hit
-	self:_updatePartPanel()
 end
 
 function VABController:_onInputBegan(input, gameProcessed)
@@ -964,12 +827,6 @@ function VABController:_onInputBegan(input, gameProcessed)
 			return -- click landed on UI, or a drag is already running
 		end
 		self:_tryPickup()
-	elseif input.UserInputType == Enum.UserInputType.MouseButton2 then
-		-- Record the down hit/position; on release we decide click (tweak) vs drag (orbit).
-		if not gameProcessed and not self._drag then
-			self._rmbStart = UserInputService:GetMouseLocation()
-			self._rmbHit = self:_pickIndex()
-		end
 	elseif input.KeyCode == Enum.KeyCode.Escape then
 		self:_cancelDrag(true)
 	elseif input.KeyCode == Enum.KeyCode.C then
@@ -1028,10 +885,9 @@ function VABController:_updatePartPanel()
 		def = p and p.def
 	end
 	if not def then
-		self._partLabel.Text = "Hold + drag a part from the left,\nor a placed part, to move it.\nRight-click a part to tweak it."
+		self._partLabel.Text = "Hold + drag a part from the left,\nor a placed part, to move it."
 		self._partLabel.TextColor3 = DIM
 		self._removeBtn.Visible = false
-		self:_updateTweaks()
 		return
 	end
 	self._partLabel.TextColor3 = TEXT
@@ -1050,7 +906,6 @@ function VABController:_updatePartPanel()
 		lines[#lines + 1] = string.format("exhaust v %d", def.exhaustVelocity or 0)
 	end
 	self._partLabel.Text = table.concat(lines, "\n")
-	self:_updateTweaks()
 end
 
 return VABController
