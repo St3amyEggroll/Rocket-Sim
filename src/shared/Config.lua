@@ -103,6 +103,14 @@ Config.FLIGHT = {
 -- flight is integrated numerically (drag is not a conic force) and time warp is
 -- pinned to 1x, exactly like KSP. Above ATMOSPHERE.top the air is gone and coasting
 -- is back on analytic rails.
+-- Separated debris (spent stages, jettisoned fairings) is simulated with the SAME gravity +
+-- atmospheric drag as the active craft (not Roblox physics), so it falls/reenters realistically.
+Config.DEBRIS = {
+	drag = 0.0007, -- effective ballistic drag coeff (decel = drag * densityFrac * speed^2)
+	maxCount = 10, -- cap concurrently-tracked pieces (oldest dropped past this)
+	maxAge = 150, -- seconds before a piece despawns (so orbital debris doesn't pile up)
+}
+
 Config.ATMOSPHERE = {
 	top = 2500, -- studs above sea level where the air becomes negligible
 	scaleHeight = 520, -- air density e-folds (1/e) over this many studs of altitude

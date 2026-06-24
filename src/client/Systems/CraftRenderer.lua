@@ -62,6 +62,7 @@ function CraftRenderer:Start()
 	self._vehicle = Registry:Get("VehicleController")
 	local Flight = Registry:Get("FlightController")
 	self._flight = Flight
+	self._debris = Registry:Get("DebrisController")
 	self._launchUp = Flight:GetLaunchUp() -- radial-out at the launch site (build +Y -> this)
 
 	self:_cleanupWorld()
@@ -120,30 +121,27 @@ function CraftRenderer:_jettison(groups)
 			local primary = parts[1]
 			for _, part in ipairs(parts) do
 				part.Parent = spent -- reparent keeps world position
-				part.CanCollide = true
-				part.CanQuery = true
+				part.Anchored = true -- sim-controlled: DebrisController moves it via PivotTo
+				part.CanCollide = false
+				part.CanQuery = false
 				part.CastShadow = true
-				if part ~= primary then
-					local weld = Instance.new("WeldConstraint")
-					weld.Part0 = primary
-					weld.Part1 = part
-					weld.Parent = primary
-				end
-			end
-			for _, part in ipairs(parts) do
-				part.Anchored = false -- now physics debris (one welded body), gravity takes it
 			end
 			spent.PrimaryPart = primary
-			spent.Parent = Workspace
+			spent.WorldPivot = CFrame.new(center) -- tumble about the clump's centre
 
 			-- Outward = away from the craft axis (sideways for boosters); near-zero for an
 			-- inline stage, so those just get a shove straight down the stack.
 			local outward = center - craftCF.Position
 			outward = outward - craftCF.UpVector * outward:Dot(craftCF.UpVector)
 			local odir = (outward.Magnitude > 1e-3) and outward.Unit or -craftCF.UpVector
-			primary.AssemblyLinearVelocity = (self._lastVel or Vector3.zero) + odir * 10 - craftCF.UpVector * 5
-			primary.AssemblyAngularVelocity = odir:Cross(craftCF.UpVector) * 0.6
-			Debris:AddItem(spent, 45)
+			local sepImpulse = odir * 10 - craftCF.UpVector * 5
+			local spin = odir:Cross(craftCF.UpVector) * 0.6
+			-- Hand off to the sim so it falls/reenters under real gravity + drag (not Roblox).
+			if self._debris then
+				self._debris:Spawn(spent, center, sepImpulse, spin)
+			else
+				spent.Parent = Workspace
+			end
 		end
 	end
 end

@@ -645,6 +645,26 @@ end
 function FlightController:GetMoonRadius()
 	return self._moon.radius
 end
+-- The active central body for separated debris to inherit (id, gravity, radius, and the
+-- body's Terra-centric centre + velocity at this instant).
+function FlightController:GetActiveBodyInfo()
+	return {
+		id = self._bodyId,
+		mu = self._mu,
+		radius = self._bodyRadius,
+		center = self:_bodyCenter(),
+		vel = self:_bodyVel(),
+	}
+end
+-- Terra-centric centre of any body by id (for placing debris bound to that body).
+function FlightController:GetBodyCenter(id)
+	if id == "moon" then
+		return self:GetMoonCenter()
+	elseif id == "sun" then
+		return self:GetSunCenter()
+	end
+	return Orbit.vec(0, 0, 0)
+end
 -- The Sun's current Terra-centric position (for SunRenderer) and its size.
 function FlightController:GetSunCenter()
 	local T = self:_terraStateAt(self._missionTime)
