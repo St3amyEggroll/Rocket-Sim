@@ -40,6 +40,8 @@ local initOrder = {
 	"StagingController",
 	"HUDController",
 	"MenuController",
+	"NavBarController",
+	"MenuFlowController",
 }
 
 -- Listeners must Start before the flight loop begins firing events.
@@ -67,6 +69,8 @@ local startOrder = {
 	"StagingController",
 	"HUDController",
 	"MenuController",
+	"NavBarController",
+	"MenuFlowController",
 	"FlightController",
 }
 

@@ -285,6 +285,17 @@ Config.CAMERA = {
 	mapCamMultiplier = 1.65,
 }
 
+-- Front-end cinematic: while in the menu (MainMenu / Settings / ModeSelect / SaveSelect) the
+-- live system keeps running behind the UI -- the camera makes a slow auto-orbit of Terra while
+-- the Mun orbits and the Sun's terminator sweeps. timeScale accelerates the (paused-gameplay)
+-- mission clock so the bodies visibly move; spinRate is the camera's own auto-rotation.
+Config.MENU = {
+	camDist = 22000, -- camera distance from Terra's centre (just past nearDist -> slight pull-in)
+	camElevation = math.rad(16), -- look slightly down on the orbital plane (the Mun reads as an arc)
+	spinRate = 0.05, -- camera auto-orbit speed (rad/s) -> ~125s per lap
+	timeScale = 60, -- mission-clock multiplier so the Mun orbits in ~40s (period 2384s / 60)
+}
+
 Config.ORBITLINE = {
 	segments = 90,
 	color = Color3.fromRGB(90, 200, 255),

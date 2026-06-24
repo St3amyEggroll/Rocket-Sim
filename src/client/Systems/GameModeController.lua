@@ -1,13 +1,13 @@
 --[[
 	GameModeController
-	Owner of: the current game mode ("VAB" while building, "Flight" while flying).
+	Owner of: the current game STATE.
 
-	Other systems read GetMode() and listen to ModeChanged. The B key (via
-	InputController) and the VAB Launch button both route through SetMode.
+	Menu states (front-end, no gameplay): "MainMenu", "Settings", "ModeSelect", "SaveSelect".
+	In-game states: "VAB" (build), "Research" (tech tree), "Flight" (flying).
 
-	ReturnToLaunch() is KSP's "Revert to Launch": it puts the craft back on the pad
-	with a fresh fuel load. If we are already flying it fires LaunchReset (which
-	FlightController turns into an in-place reset); from the VAB it just launches.
+	Other systems read GetMode() and listen to ModeChanged. The B key toggles VAB<->Flight
+	in-game; the top nav bar switches Build/Research/Launch; the front-end (MenuFlowController)
+	drives the menu states and enters the game (-> VAB) once a save is loaded.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -18,8 +18,10 @@ local Signal = require(Shared:WaitForChild("Signal"))
 
 local GameModeController = {}
 
+local MENU_STATES = { MainMenu = true, Settings = true, ModeSelect = true, SaveSelect = true }
+
 function GameModeController:Init()
-	self._mode = "VAB"
+	self._mode = "MainMenu"
 	self.ModeChanged = Signal.new()
 	self.LaunchReset = Signal.new() -- "revert to launch" while already in Flight
 end
@@ -27,12 +29,25 @@ end
 function GameModeController:Start()
 	local Input = Registry:Get("InputController")
 	Input:GetToggleModeSignal():Connect(function()
-		self:SetMode(self._mode == "VAB" and "Flight" or "VAB")
+		-- B only toggles build<->flight while in the game (ignored in menus / research).
+		if self._mode == "VAB" then
+			self:SetMode("Flight")
+		elseif self._mode == "Flight" then
+			self:SetMode("VAB")
+		end
 	end)
 end
 
 function GameModeController:GetMode(): string
 	return self._mode
+end
+
+function GameModeController:IsMenu(): boolean
+	return MENU_STATES[self._mode] == true
+end
+
+function GameModeController:IsInGame(): boolean
+	return MENU_STATES[self._mode] ~= true
 end
 
 function GameModeController:SetMode(mode: string)

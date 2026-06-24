@@ -13,12 +13,12 @@ local Players = game:GetService("Players")
 -- No server-side physics character; the client renders a cosmetic rider instead.
 Players.CharacterAutoLoads = false
 
--- Per-player tech progression (science + unlocked parts), persisted via DataStore.
+-- Per-player save slots (science, unlocked parts, craft) persisted via DataStore.
 local ok, err = pcall(function()
-	require(script:WaitForChild("TechServer")).start()
+	require(script:WaitForChild("SaveServer")).start()
 end)
 if not ok then
-	warn("[RocketSim] TechServer failed to start: " .. tostring(err))
+	warn("[RocketSim] SaveServer failed to start: " .. tostring(err))
 end
 
 Players.PlayerAdded:Connect(function(player)

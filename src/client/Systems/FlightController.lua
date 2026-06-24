@@ -147,6 +147,15 @@ function FlightController:_launchAttitude()
 end
 
 function FlightController:_onMode(mode)
+	-- Front-end page changes (menu -> menu): keep the cinematic sim running so the Mun and
+	-- Sun keep orbiting smoothly between pages -- don't snap the clock or reset the craft.
+	-- We DO reset when entering the game (-> VAB/Flight) or returning to the menu from in-game.
+	local isMenu = self._mode:IsMenu()
+	if isMenu and self._prevWasMenu then
+		return
+	end
+	self._prevWasMenu = isMenu
+
 	self._vehicle:ResetRuntime()
 	-- Back on the pad: reset to Terra (the active body), at the equatorial launch site.
 	self._bodyId = "planet"
@@ -406,6 +415,7 @@ end
 
 function FlightController:_fire(extra)
 	extra.mode = self._mode:GetMode()
+	extra.isMenu = self._mode:IsMenu()
 	extra.nose = self._attitude.LookVector
 	extra.attitude = self._attitude
 	extra.mapMode = self._input:GetMapMode()
@@ -446,6 +456,11 @@ function FlightController:_step(rawDt)
 
 	if mode ~= "Flight" then
 		self._status = "VAB"
+		-- Front-end cinematic: keep the system in motion so the Mun orbits and the Sun's
+		-- terminator sweeps behind the menu. (In VAB/Research the clock holds still.)
+		if self._mode:IsMenu() then
+			self._missionTime += math.clamp(rawDt, 0, Config.FLIGHT.maxDt) * Config.MENU.timeScale
+		end
 		self._origin:UpdateForBody(vadd(pos, self:_bodyCenter()))
 		self:_fire({ pointDir = self._attitude.LookVector, throttle = 0, powered = false, status = "VAB", warp = 1, sas = "VAB" })
 		return

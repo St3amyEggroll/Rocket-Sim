@@ -45,7 +45,7 @@ end
 function TechController:Start()
 	self._mode = Registry:Get("GameModeController")
 
-	local remotes = ReplicatedStorage:WaitForChild("TechRemotes", 10)
+	local remotes = ReplicatedStorage:WaitForChild("GameRemotes", 10)
 	if remotes then
 		self._stateEv = remotes:WaitForChild("State")
 		self._reportEv = remotes:WaitForChild("ReportMilestone")
@@ -57,10 +57,11 @@ function TechController:Start()
 	end
 
 	self:_buildUI()
+	-- The tech tree lives in its own RESEARCH area (the nav bar's Research tab), not the VAB.
 	self._mode.ModeChanged:Connect(function(m)
-		self:_setTreeBarVisible(m == "VAB")
+		self:_setResearchVisible(m == "Research")
 	end)
-	self:_setTreeBarVisible(self._mode:GetMode() == "VAB")
+	self:_setResearchVisible(self._mode:GetMode() == "Research")
 
 	Registry:Get("FlightController"):GetUpdatedSignal():Connect(function(state, info)
 		self:_checkMilestones(state, info)
@@ -173,75 +174,77 @@ function TechController:_buildUI()
 	self._toastLabel = toast
 	self._toastToken = 0
 
-	-- Tech-tree GUI (VAB only): a top bar (science + open button) and the tree panel.
+	-- RESEARCH area (its own screen, opened by the nav bar's Research tab -> mode "Research"):
+	-- a dim full-screen backdrop with the tech-tree panel.
 	local gui = Instance.new("ScreenGui")
-	gui.Name = "TechTreeGui"
+	gui.Name = "ResearchGui"
 	gui.ResetOnSpawn = false
 	gui.IgnoreGuiInset = true
-	gui.DisplayOrder = 60
+	gui.DisplayOrder = 55
 	gui.Enabled = false
 	gui.Parent = pg
 	self._gui = gui
 
-	self._sciBtn = Instance.new("TextButton")
-	self._sciBtn.AnchorPoint = Vector2.new(0.5, 0)
-	self._sciBtn.Position = UDim2.new(0.5, 0, 0, 46)
-	self._sciBtn.Size = UDim2.fromOffset(260, 28)
-	self._sciBtn.BackgroundColor3 = ROW
-	self._sciBtn.BorderSizePixel = 0
-	self._sciBtn.Font = Enum.Font.GothamBold
-	self._sciBtn.TextSize = 14
-	self._sciBtn.TextColor3 = ACCENT
-	self._sciBtn.Text = "TECH TREE  -  Science: 0"
-	corner(self._sciBtn, 6)
-	self._sciBtn.Parent = gui
-	self._sciBtn.Activated:Connect(function()
-		self._panel.Visible = not self._panel.Visible
-		self:_refreshTree()
-	end)
+	local backdrop = Instance.new("Frame")
+	backdrop.Size = UDim2.fromScale(1, 1)
+	backdrop.BackgroundColor3 = Color3.fromRGB(8, 10, 16)
+	backdrop.BackgroundTransparency = 0.25
+	backdrop.BorderSizePixel = 0
+	backdrop.Parent = gui
 
 	local panel = Instance.new("Frame")
 	panel.AnchorPoint = Vector2.new(0.5, 0.5)
 	panel.Position = UDim2.fromScale(0.5, 0.5)
-	panel.Size = UDim2.fromOffset(440, 480)
+	panel.Size = UDim2.fromOffset(460, 520)
 	panel.BackgroundColor3 = BG
 	panel.BackgroundTransparency = 0.05
 	panel.BorderSizePixel = 0
-	panel.Visible = false
 	corner(panel, 12)
 	panel.Parent = gui
 	self._panel = panel
 
 	local title = Instance.new("TextLabel")
 	title.Position = UDim2.fromOffset(16, 12)
-	title.Size = UDim2.new(1, -32, 0, 24)
+	title.Size = UDim2.new(1, -200, 0, 24)
 	title.BackgroundTransparency = 1
 	title.Font = Enum.Font.GothamBold
 	title.TextSize = 18
 	title.TextXAlignment = Enum.TextXAlignment.Left
 	title.TextColor3 = ACCENT
-	title.Text = "TECH TREE"
+	title.Text = "RESEARCH"
 	title.Parent = panel
 
-	local close = Instance.new("TextButton")
-	close.AnchorPoint = Vector2.new(1, 0)
-	close.Position = UDim2.new(1, -12, 0, 10)
-	close.Size = UDim2.fromOffset(28, 28)
-	close.BackgroundColor3 = ROW
-	close.BorderSizePixel = 0
-	close.Font = Enum.Font.GothamBold
-	close.TextSize = 16
-	close.TextColor3 = TEXT
-	close.Text = "X"
-	corner(close, 6)
-	close.Parent = panel
-	close.Activated:Connect(function()
-		panel.Visible = false
+	self._sciLabel = Instance.new("TextLabel")
+	self._sciLabel.AnchorPoint = Vector2.new(1, 0)
+	self._sciLabel.Position = UDim2.new(1, -16, 0, 14)
+	self._sciLabel.Size = UDim2.fromOffset(180, 20)
+	self._sciLabel.BackgroundTransparency = 1
+	self._sciLabel.Font = Enum.Font.GothamBold
+	self._sciLabel.TextSize = 15
+	self._sciLabel.TextXAlignment = Enum.TextXAlignment.Right
+	self._sciLabel.TextColor3 = Color3.fromRGB(150, 235, 170)
+	self._sciLabel.Text = "Science: 0"
+	self._sciLabel.Parent = panel
+
+	local back = Instance.new("TextButton")
+	back.AnchorPoint = Vector2.new(0.5, 1)
+	back.Position = UDim2.new(0.5, 0, 1, -12)
+	back.Size = UDim2.fromOffset(180, 30)
+	back.BackgroundColor3 = ROW
+	back.BorderSizePixel = 0
+	back.Font = Enum.Font.GothamBold
+	back.TextSize = 14
+	back.TextColor3 = TEXT
+	back.Text = "Back to Build"
+	corner(back, 6)
+	back.Parent = panel
+	back.Activated:Connect(function()
+		self._mode:SetMode("VAB")
 	end)
 
 	local list = Instance.new("Frame")
 	list.Position = UDim2.fromOffset(14, 46)
-	list.Size = UDim2.new(1, -28, 1, -58)
+	list.Size = UDim2.new(1, -28, 1, -98)
 	list.BackgroundTransparency = 1
 	list.Parent = panel
 	local layout = Instance.new("UIListLayout")
@@ -305,12 +308,9 @@ function TechController:_buildUI()
 	self:_refreshTree()
 end
 
-function TechController:_setTreeBarVisible(v)
+function TechController:_setResearchVisible(v)
 	if self._gui then
 		self._gui.Enabled = v
-		if not v and self._panel then
-			self._panel.Visible = false
-		end
 	end
 end
 
@@ -319,8 +319,8 @@ function TechController:_refreshTree()
 		return
 	end
 	local sci = self:GetScience()
-	if self._sciBtn then
-		self._sciBtn.Text = ("TECH TREE  -  Science: %d"):format(sci)
+	if self._sciLabel then
+		self._sciLabel.Text = ("Science: %d"):format(sci)
 	end
 	for i, tier in ipairs(TechTree.tiers) do
 		local r = self._tierRows[i]

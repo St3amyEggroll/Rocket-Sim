@@ -53,6 +53,14 @@ function SkyController:Start()
 	self:_setupSky()
 
 	Flight:GetUpdatedSignal():Connect(function(state, info)
+		if info and info.isMenu then
+			-- Front-end cinematic: always the dark, starry space sky, evenly lit (Terra reads
+			-- as a globe against the stars regardless of where the pad sits on the day/night line).
+			self._alt = Config.SKY.blendEndAlt
+			self._mapMode = false
+			self._sunlit = 1
+			return
+		end
 		if info and info.bodyId == "moon" then
 			-- Airless moon: always the space sky (stars), regardless of moon altitude.
 			self._alt = Config.SKY.blendEndAlt

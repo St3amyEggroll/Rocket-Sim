@@ -82,6 +82,18 @@ function CameraController:_update(state, info)
 		cam.CameraType = Enum.CameraType.Scriptable
 	end
 
+	-- Front-end: a slow cinematic auto-orbit of Terra. The menu plays over the live system,
+	-- so the Mun arcs past and the Sun sweeps the terminator while the camera drifts around.
+	if info and info.isMenu then
+		local M = Config.MENU
+		local center = self._origin:ToRender(Orbit.vec(0, 0, 0)) -- Terra at the world origin
+		local az = os.clock() * M.spinRate
+		local ce = math.cos(M.camElevation)
+		local dir = Vector3.new(math.cos(az) * ce, math.sin(M.camElevation), math.sin(az) * ce)
+		cam.CFrame = CFrame.lookAt(center + dir * M.camDist, center, Vector3.yAxis)
+		return
+	end
+
 	local orbit = self._input:GetCameraOrbit()
 
 	-- VAB: orbit the rocket on the pad so you can build it in 3D. Everything is framed in
