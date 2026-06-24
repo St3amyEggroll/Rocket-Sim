@@ -263,64 +263,79 @@ function CraftRenderer:_rebuildCraft()
 	local prof = self._vehicle:GetRotProfile()
 	local axisX, axisZ = off.X, off.Z
 
-	local flame = makePart(model, "Flame", {
-		Shape = Enum.PartType.Ball,
-		Size = Vector3.new(bottomRadius * 1.5, 12, bottomRadius * 1.5),
-		Color = Color3.fromRGB(255, 150, 45),
-		Material = Enum.Material.Neon,
+	-- Engine exhaust: a glowing plume + a particle jet at EACH active engine's nozzle, so a
+	-- cluster or a ring of boosters all fire individually (not one flame at the centre).
+	-- Driven by thrustLevel + atmosphere in _render.
+	self._plumes = {}
+	for _, e in ipairs(layout) do
+		if (e.def.thrust or 0) > 0 then
+			local er = e.def.radius or bottomRadius
+			local nozzleY = e.cf.Y - (e.def.height or 0) * 0.5
+			local plume = makePart(model, "Plume", {
+				Shape = Enum.PartType.Ball,
+				Size = Vector3.new(er * 1.6, er * 5, er * 1.6),
+				Color = Color3.fromRGB(255, 150, 45),
+				Material = Enum.Material.Neon,
+				Transparency = 1,
+				CFrame = CFrame.new(e.cf.X, nozzleY - er * 2.4, e.cf.Z),
+			})
+			local jet = Instance.new("ParticleEmitter")
+			jet.Texture = "rbxasset://textures/particles/fire_main.dds"
+			jet.Color = ColorSequence.new(Color3.fromRGB(255, 236, 170), Color3.fromRGB(255, 108, 34))
+			jet.Size = NumberSequence.new({
+				NumberSequenceKeypoint.new(0, er * 1.7),
+				NumberSequenceKeypoint.new(1, er * 0.3),
+			})
+			jet.Transparency = NumberSequence.new({
+				NumberSequenceKeypoint.new(0, 0.05),
+				NumberSequenceKeypoint.new(1, 1),
+			})
+			jet.Lifetime = NumberRange.new(0.16, 0.32)
+			jet.Speed = NumberRange.new(60, 90)
+			jet.SpreadAngle = Vector2.new(6, 6)
+			jet.EmissionDirection = Enum.NormalId.Bottom
+			jet.Acceleration = Vector3.new(0, -45, 0)
+			jet.LightEmission = 0.9
+			jet.Rate = 0
+			jet.Parent = plume
+			self._plumes[#self._plumes + 1] = { plume = plume, jet = jet, index = e.index, r = er }
+		end
+	end
+
+	-- One shared light + launch-dust smoke at the base (cheaper than per-engine copies).
+	local fxAnchor = makePart(model, "EngineFX", {
+		Size = Vector3.new(0.2, 0.2, 0.2),
 		Transparency = 1,
-		CFrame = CFrame.new(axisX, bottomY - 6, axisZ),
+		CFrame = CFrame.new(axisX, bottomY, axisZ),
 	})
 	local light = Instance.new("PointLight")
 	light.Color = Color3.fromRGB(255, 160, 70)
-	light.Range = 40
+	light.Range = 48
 	light.Brightness = 5
 	light.Enabled = false
-	light.Parent = flame
-
-	-- Exhaust plume + smoke particles, shot down the stack (the flame's local -Y). Rates
-	-- are driven by throttle in _render.
-	local exhaust = Instance.new("ParticleEmitter")
-	exhaust.Texture = "rbxasset://textures/particles/fire_main.dds"
-	exhaust.Color = ColorSequence.new(Color3.fromRGB(255, 230, 150), Color3.fromRGB(255, 120, 40))
-	exhaust.Size = NumberSequence.new({
-		NumberSequenceKeypoint.new(0, bottomRadius * 1.4),
-		NumberSequenceKeypoint.new(1, bottomRadius * 0.3),
-	})
-	exhaust.Transparency = NumberSequence.new({
-		NumberSequenceKeypoint.new(0, 0.1),
-		NumberSequenceKeypoint.new(1, 1),
-	})
-	exhaust.Lifetime = NumberRange.new(0.18, 0.34)
-	exhaust.Speed = NumberRange.new(55, 80)
-	exhaust.SpreadAngle = Vector2.new(7, 7)
-	exhaust.EmissionDirection = Enum.NormalId.Bottom
-	exhaust.LightEmission = 0.9
-	exhaust.Rate = 0
-	exhaust.Parent = flame
+	light.Parent = fxAnchor
 
 	local smoke = Instance.new("ParticleEmitter")
 	smoke.Texture = "rbxasset://textures/particles/smoke_main.dds"
-	smoke.Color = ColorSequence.new(Color3.fromRGB(180, 180, 185), Color3.fromRGB(110, 110, 115))
+	smoke.Color = ColorSequence.new(Color3.fromRGB(190, 190, 196), Color3.fromRGB(110, 110, 116))
 	smoke.Size = NumberSequence.new({
-		NumberSequenceKeypoint.new(0, bottomRadius * 1.2),
-		NumberSequenceKeypoint.new(1, bottomRadius * 4),
+		NumberSequenceKeypoint.new(0, bottomRadius * 1.4),
+		NumberSequenceKeypoint.new(1, bottomRadius * 4.5),
 	})
 	smoke.Transparency = NumberSequence.new({
-		NumberSequenceKeypoint.new(0, 0.4),
+		NumberSequenceKeypoint.new(0, 0.35),
 		NumberSequenceKeypoint.new(1, 1),
 	})
-	smoke.Lifetime = NumberRange.new(0.6, 1.2)
-	smoke.Speed = NumberRange.new(12, 26)
-	smoke.SpreadAngle = Vector2.new(16, 16)
+	smoke.Lifetime = NumberRange.new(0.6, 1.3)
+	smoke.Speed = NumberRange.new(12, 28)
+	smoke.SpreadAngle = Vector2.new(18, 18)
 	smoke.EmissionDirection = Enum.NormalId.Bottom
 	smoke.Rate = 0
-	smoke.Parent = flame
-	self._exhaust = exhaust
+	smoke.Parent = fxAnchor
 	self._smoke = smoke
 
-	-- Reentry plasma envelope: a neon shell wrapping the craft, hidden until the
-	-- flight loop reports reentry heating (then it glows orange -> white-hot).
+	-- Reentry plasma: a neon sheath wrapping the craft, a streaming plasma wake, and a glow
+	-- light -- all hidden until the flight loop reports reentry heating (orange -> white-hot).
 	local glowH = math.max(prof.length, 6)
 	local glow = makePart(model, "Reentry", {
 		Shape = Enum.PartType.Ball,
@@ -330,6 +345,32 @@ function CraftRenderer:_rebuildCraft()
 		Transparency = 1,
 		CFrame = CFrame.new(axisX, bottomY + glowH * 0.4, axisZ),
 	})
+	local plasma = Instance.new("ParticleEmitter")
+	plasma.Texture = "rbxasset://textures/particles/fire_main.dds"
+	plasma.Color = ColorSequence.new(Color3.fromRGB(255, 150, 60), Color3.fromRGB(255, 80, 30))
+	plasma.Size = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, bottomRadius * 2.2),
+		NumberSequenceKeypoint.new(1, bottomRadius * 0.4),
+	})
+	plasma.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0.2),
+		NumberSequenceKeypoint.new(1, 1),
+	})
+	plasma.Lifetime = NumberRange.new(0.25, 0.5)
+	plasma.Speed = NumberRange.new(40, 70)
+	plasma.SpreadAngle = Vector2.new(28, 28)
+	plasma.EmissionDirection = Enum.NormalId.Top -- streams back past the body (leading edge ahead)
+	plasma.LightEmission = 1
+	plasma.Rate = 0
+	plasma.Parent = glow
+	local plasmaLight = Instance.new("PointLight")
+	plasmaLight.Color = Color3.fromRGB(255, 130, 60)
+	plasmaLight.Range = 40
+	plasmaLight.Brightness = 0
+	plasmaLight.Enabled = false
+	plasmaLight.Parent = glow
+	self._reentryEmitter = plasma
+	self._reentryLight = plasmaLight
 
 	-- Parachute canopy: a broad translucent dome above the nose, hidden until the flight
 	-- loop reports a deployed chute (in air).
@@ -345,7 +386,6 @@ function CraftRenderer:_rebuildCraft()
 
 	model.Parent = Workspace
 	self._craft = model
-	self._flame = flame
 	self._flameLight = light
 	self._reentryGlow = glow
 	self._chute = canopy
@@ -496,20 +536,35 @@ function CraftRenderer:_render(state, info)
 	-- solid that can't be throttled), so a firing SRB plumes even at zero throttle.
 	local vthr = (info and info.thrustLevel) or 0
 	local burning = vthr > 0
-	if burning then
-		self._flame.Transparency = 0.2
-		self._flame.Size = Vector3.new(self._flame.Size.X, 8 + 26 * vthr, self._flame.Size.Z)
-		self._flameLight.Enabled = true
-		self._flameLight.Brightness = 4 + 4 * vthr
-	else
-		self._flame.Transparency = 1
-		self._flameLight.Enabled = false
+	local thick = info and info.inAtmo
+	-- Per-engine plumes: only the nozzles of engines actually firing light up. In thin air the
+	-- jets collimate (faster, tight); in vacuum they spread and slow.
+	if self._plumes then
+		local firing = {}
+		if burning then
+			for _, en in ipairs(self._vehicle:GetActiveEngines()) do
+				firing[en.index] = true
+			end
+		end
+		for _, pl in ipairs(self._plumes) do
+			if burning and firing[pl.index] then
+				pl.plume.Transparency = 0.25
+				pl.plume.Size = Vector3.new(pl.r * 1.6, pl.r * (3 + 7 * vthr), pl.r * 1.6)
+				pl.jet.Rate = (thick and 120 or 80) * vthr
+				pl.jet.SpreadAngle = thick and Vector2.new(6, 6) or Vector2.new(15, 15)
+			else
+				pl.plume.Transparency = 1
+				pl.jet.Rate = 0
+			end
+		end
 	end
-	-- Exhaust + smoke scale with thrust; in air the smoke billows (launch dust).
-	if self._exhaust then
-		local thick = info and info.inAtmo
-		self._exhaust.Rate = burning and (90 * vthr) or 0
-		self._smoke.Rate = burning and ((thick and 60 or 22) * vthr) or 0
+	if self._flameLight then
+		self._flameLight.Enabled = burning
+		self._flameLight.Brightness = 4 + 5 * vthr
+	end
+	-- Smoke only billows in air (launch dust); negligible in vacuum.
+	if self._smoke then
+		self._smoke.Rate = (burning and thick) and (70 * vthr) or 0
 	end
 
 	if self._chute then
@@ -518,11 +573,24 @@ function CraftRenderer:_render(state, info)
 
 	local re = (info and info.reentry) or 0
 	if re > 0 then
-		self._reentryGlow.Transparency = 1 - 0.6 * re
+		self._reentryGlow.Transparency = 0.7 - 0.6 * re
 		-- orange (cool) -> white-hot (hot)
 		self._reentryGlow.Color = Color3.fromRGB(255, 140 + math.floor(90 * re), 50 + math.floor(150 * re))
+		if self._reentryEmitter then
+			self._reentryEmitter.Rate = 26 + 90 * re
+		end
+		if self._reentryLight then
+			self._reentryLight.Enabled = true
+			self._reentryLight.Brightness = 2 + 6 * re
+		end
 	else
 		self._reentryGlow.Transparency = 1
+		if self._reentryEmitter then
+			self._reentryEmitter.Rate = 0
+		end
+		if self._reentryLight then
+			self._reentryLight.Enabled = false
+		end
 	end
 end
 
