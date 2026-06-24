@@ -244,8 +244,13 @@ Config.SOUND = {
 	engine = "rbxassetid://142376088", -- looped engine rumble
 	wind = "rbxassetid://9116367343", -- looped wind
 	explosion = "rbxassetid://142070127", -- one-shot explosion
-	engineMaxVolume = 0.55,
-	windMaxVolume = 0.5,
+	staging = "", -- one-shot clunk on staging (add your own id to hear it)
+	sonicBoom = "", -- one-shot when crossing the sound barrier (add your own id)
+	engineMaxVolume = 0.6,
+	windMaxVolume = 0.55,
+	stagingVolume = 0.65,
+	sonicBoomVolume = 0.8,
+	machSpeed = 330, -- speed (studs/s) treated as the sound barrier for the boom
 }
 
 Config.TIMEWARP = {
