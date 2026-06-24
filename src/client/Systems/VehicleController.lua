@@ -150,7 +150,7 @@ function VehicleController:_computeSections()
 		if not isDecoupler(p.def) then
 			local root = find(i)
 			sectionOf[i] = root
-			capacity[root] = (capacity[root] or 0) + (p.def.fuel or 0)
+			capacity[root] = (capacity[root] or 0) + (p.def.fuel or 0) * (p.fuelFrac or 1)
 		end
 	end
 	-- Radial-mount engines carry no tank: they draw from the part they're bolted to.
@@ -443,6 +443,49 @@ function VehicleController:GetSymGroupSize(index)
 		end
 	end
 	return n
+end
+
+-- Per-part tweaks, applied to the WHOLE symmetry group (so a mirrored pair stays matched):
+-- a tank's fuel fraction, an engine's thrust limit, and a decoupler's ejection force. Each
+-- re-derives sections/stats and fires Changed (via _recompute) so the readouts refresh.
+function VehicleController:GetPartTweaks(index)
+	local p = self._parts[index]
+	if not p then
+		return nil
+	end
+	return { fuelFrac = p.fuelFrac or 1, thrustLimit = p.thrustLimit or 1, ejectForce = p.ejectForce or 1 }
+end
+
+function VehicleController:_setTweak(index, field, value)
+	for _, g in ipairs(self:GetSymGroup(index)) do
+		local p = self._parts[g.index]
+		if p then
+			p[field] = value
+		end
+	end
+	self:_recompute()
+end
+
+function VehicleController:SetPartFuelFrac(index, frac)
+	self:_setTweak(index, "fuelFrac", math.clamp(frac, 0, 1))
+end
+function VehicleController:SetPartThrustLimit(index, limit)
+	self:_setTweak(index, "thrustLimit", math.clamp(limit, 0, 1))
+end
+function VehicleController:SetPartEjectForce(index, force)
+	self:_setTweak(index, "ejectForce", math.clamp(force, 0.25, 3))
+end
+
+-- Largest decoupler ejection force in a dropped clump (scales its separation kick).
+function VehicleController:GroupEjectForce(group)
+	local f
+	for _, i in ipairs(group) do
+		local p = self._parts[i]
+		if p and isDecoupler(p.def) then
+			f = math.max(f or 0, p.ejectForce or 1)
+		end
+	end
+	return f or 1
 end
 
 -- A part plus all its descendants (parents listed before children), by part index.
@@ -792,9 +835,9 @@ end
 
 -- Current fuel held by a tank: its share of its section's remaining fuel.
 function VehicleController:_currentFuel(i)
-	local def = self._parts[i].def
-	local cap = def.fuel
-	if not cap or cap <= 0 then
+	local p = self._parts[i]
+	local cap = (p.def.fuel or 0) * (p.fuelFrac or 1)
+	if cap <= 0 then
 		return 0
 	end
 	local sec = self._sectionOf[i]
@@ -857,7 +900,7 @@ function VehicleController:_computeActiveEngines()
 				out[#out + 1] = {
 					x = p.cf.X,
 					z = p.cf.Z,
-					thrust = p.def.thrust or 0,
+					thrust = (p.def.thrust or 0) * (p.thrustLimit or 1),
 					ve = p.def.exhaustVelocity or 1,
 					solid = p.def.solid == true, -- fires at full thrust, ignores throttle
 					section = sec,

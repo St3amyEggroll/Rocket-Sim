@@ -134,7 +134,8 @@ function CraftRenderer:_jettison(groups)
 			local outward = center - craftCF.Position
 			outward = outward - craftCF.UpVector * outward:Dot(craftCF.UpVector)
 			local odir = (outward.Magnitude > 1e-3) and outward.Unit or -craftCF.UpVector
-			local sepImpulse = odir * 10 - craftCF.UpVector * 5
+			local force = self._vehicle:GroupEjectForce(group)
+			local sepImpulse = (odir * 10 - craftCF.UpVector * 5) * force
 			local spin = odir:Cross(craftCF.UpVector) * 0.6
 			-- Hand off to the sim so it falls/reenters under real gravity + drag (not Roblox).
 			if self._debris then
