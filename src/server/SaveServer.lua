@@ -167,24 +167,24 @@ local function onReportMilestone(player, milestoneId)
 	pushState(player)
 end
 
-local function onUnlockTier(player, tierId)
+local function onUnlockTier(player, nodeId)
 	local p = profiles[player.UserId]
-	if not p or type(tierId) ~= "string" or p.unlocked[tierId] then
+	if not p or type(nodeId) ~= "string" or p.unlocked[nodeId] then
 		return
 	end
-	local tier = TechTree.tierById(tierId)
-	if not tier then
+	local node = TechTree.nodeById(nodeId)
+	if not node then
 		return
 	end
-	local prev = TechTree.prevTierId(tierId)
-	if prev and not p.unlocked[prev] then
+	-- Buyable only once a prerequisite is researched (branching graph), and you can afford it.
+	if not TechTree.requiresMet(node, p.unlocked) then
 		return
 	end
-	if p.science < tier.cost then
+	if p.science < node.cost then
 		return
 	end
-	p.science -= tier.cost
-	p.unlocked[tierId] = true
+	p.science -= node.cost
+	p.unlocked[nodeId] = true
 	saveActive(player)
 	pushState(player)
 end

@@ -1,8 +1,9 @@
 --[[
 	NavBarController
-	The in-game top navigation bar: Build (VAB) | Research (tech tree) | Launch, plus a Menu
-	button back to the front-end. Shown while in the game and NOT flying (VAB / Research); in
-	flight the existing MenuController handles navigation. Drives GameModeController.
+	The in-game top navigation bar: Build (VAB) | Research (tech tree), plus a Menu button back
+	to the front-end. (Launch lives on the VAB's bottom-right button, not here.) Shown while in
+	the game and NOT flying (VAB / Research); in flight the existing MenuController handles
+	navigation. Drives GameModeController.
 ]]
 
 local Players = game:GetService("Players")
@@ -49,7 +50,7 @@ function NavBarController:_build(pg)
 	local bar = Instance.new("Frame")
 	bar.AnchorPoint = Vector2.new(0.5, 0)
 	bar.Position = UDim2.new(0.5, 0, 0, 8)
-	bar.Size = UDim2.fromOffset(440, 40)
+	bar.Size = UDim2.fromOffset(290, 40)
 	bar.BackgroundColor3 = BG
 	bar.BackgroundTransparency = 0.15
 	bar.BorderSizePixel = 0
@@ -79,10 +80,6 @@ function NavBarController:_build(pg)
 	self._researchBtn = tab("RESEARCH", 122, 110, function()
 		self._mode:SetMode("Research")
 	end)
-	self._launchBtn = tab("LAUNCH", 236, 110, function()
-		self._mode:SetMode("Flight")
-	end)
-	self._launchBtn.BackgroundColor3 = Color3.fromRGB(60, 150, 90)
 
 	-- Menu button (back to the front-end), set apart on the right.
 	self._menuBtn = Instance.new("TextButton")

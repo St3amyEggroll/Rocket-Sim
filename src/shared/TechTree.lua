@@ -2,23 +2,54 @@
 	TechTree
 	ReplicatedStorage.Shared.TechTree
 
-	The tech progression, shared by client + server so they agree on costs / parts.
+	A BRANCHING tech graph (KSP-style), shared by client + server so they agree on costs / parts.
 
-	Tiers are an ordered LADDER: tier 1 ("Basics") is free and unlocked from the start. A
-	tier becomes BUYABLE once the previous tier is unlocked; unlocking it costs `cost` science
-	and grants all its parts -- which opens the next tier. Science is earned from one-time
-	milestones (firsts), defined below.
+	Each NODE grants its parts when researched. A node becomes buyable once ANY of its
+	prerequisite nodes is researched -- so the tree fans out and you choose your own path through
+	the branches (aero / fuel / engineering, then heavier lift, vacuum, radial, etc.). The root
+	("basics") is free and unlocked from the start. Science is earned from one-time milestones.
+
+	col/row are the node's grid position for the Research graph layout (col = depth from the
+	root, row = vertical lane). Edges are drawn from each node back to its `requires`.
 ]]
 
 local TechTree = {}
 
-TechTree.tiers = {
-	{ id = "basics", name = "Basics", cost = 0, parts = { "Pod", "NoseCone", "TankS", "TankL", "EngineMain", "Fin", "Parachute" } },
-	{ id = "staging", name = "Staging", cost = 6, parts = { "Decoupler", "TankXL" } },
-	{ id = "boosters", name = "Boosters", cost = 12, parts = { "SRB", "RadialDecoupler", "EngineRadial" } },
-	{ id = "heavy", name = "Heavy Lift", cost = 20, parts = { "EngineLarge", "TankXXL" } },
-	{ id = "landing", name = "Landing & Vacuum", cost = 30, parts = { "LandingLeg", "EngineVac" } },
-	{ id = "advanced", name = "Advanced", cost = 45, parts = { "EngineXL" } },
+TechTree.nodes = {
+	-- Root: the bare minimum to fly. Free + unlocked from the start (id kept as "basics" so
+	-- existing saves / the default profile's { basics = true } still seed the root).
+	{ id = "basics", name = "Start", col = 0, row = 3, cost = 0, requires = {},
+		parts = { "Pod", "EngineMain", "TankS", "Parachute" } },
+
+	-- First ring: three independent directions branching off the root.
+	{ id = "aerodynamics", name = "Aerodynamics", col = 1, row = 1, cost = 3, requires = { "basics" },
+		parts = { "Fin", "NoseCone" } },
+	{ id = "generalRocketry", name = "General Rocketry", col = 1, row = 3, cost = 4, requires = { "basics" },
+		parts = { "TankL" } },
+	{ id = "engineering", name = "Engineering", col = 1, row = 5, cost = 5, requires = { "basics" },
+		parts = { "Decoupler" } },
+
+	-- Second ring.
+	{ id = "landing", name = "Landing", col = 2, row = 0, cost = 10, requires = { "aerodynamics" },
+		parts = { "LandingLeg" } },
+	{ id = "fuelSystems", name = "Fuel Systems", col = 2, row = 2, cost = 8, requires = { "generalRocketry" },
+		parts = { "TankXL" } },
+	{ id = "heavyRocketry", name = "Heavy Rocketry", col = 2, row = 3, cost = 12, requires = { "generalRocketry" },
+		parts = { "EngineLarge" } },
+	{ id = "boosters", name = "Boosters", col = 2, row = 5, cost = 10, requires = { "engineering" },
+		parts = { "SRB", "RadialDecoupler" } },
+
+	-- Third ring.
+	{ id = "advFuelSystems", name = "Adv. Fuel Systems", col = 3, row = 2, cost = 16, requires = { "fuelSystems" },
+		parts = { "TankXXL" } },
+	{ id = "vacuumTech", name = "Vacuum Propulsion", col = 3, row = 3, cost = 20, requires = { "heavyRocketry" },
+		parts = { "EngineVac" } },
+	{ id = "radialPropulsion", name = "Radial Propulsion", col = 3, row = 5, cost = 14, requires = { "boosters" },
+		parts = { "EngineRadial" } },
+
+	-- Endgame.
+	{ id = "heavyPropulsion", name = "Heavy Propulsion", col = 4, row = 3, cost = 30, requires = { "vacuumTech" },
+		parts = { "EngineXL" } },
 }
 
 TechTree.milestones = {
@@ -40,31 +71,36 @@ function TechTree.milestoneScience(id)
 	return nil
 end
 
-function TechTree.tierById(id)
-	for i, t in ipairs(TechTree.tiers) do
-		if t.id == id then
-			return t, i
+function TechTree.nodeById(id)
+	for _, n in ipairs(TechTree.nodes) do
+		if n.id == id then
+			return n
 		end
 	end
 	return nil
 end
 
--- The id of the tier before `id` (nil for the first tier).
-function TechTree.prevTierId(id)
-	for i, t in ipairs(TechTree.tiers) do
-		if t.id == id then
-			return (i > 1) and TechTree.tiers[i - 1].id or nil
+-- A node is buyable once ANY prerequisite is researched (the root has none -> always met). This
+-- "reachable via any researched parent" rule is what lets branches be taken in any order and
+-- converge later.
+function TechTree.requiresMet(node, unlocked)
+	if not node.requires or #node.requires == 0 then
+		return true
+	end
+	for _, r in ipairs(node.requires) do
+		if unlocked[r] then
+			return true
 		end
 	end
-	return nil
+	return false
 end
 
--- Set { partId = true } of every part granted by the unlocked-tier set.
+-- Set { partId = true } of every part granted by the researched-node set.
 function TechTree.unlockedParts(unlocked)
 	local set = {}
-	for _, t in ipairs(TechTree.tiers) do
-		if unlocked[t.id] then
-			for _, p in ipairs(t.parts) do
+	for _, n in ipairs(TechTree.nodes) do
+		if unlocked[n.id] then
+			for _, p in ipairs(n.parts) do
 				set[p] = true
 			end
 		end

@@ -263,43 +263,29 @@ function TechController:_buildUI()
 	self:_refreshTree()
 end
 
--- Lay out the tech tree as a node graph: one column per tier, each part a small icon node,
--- columns wired to the previous tier by a vertical bus + horizontal stubs (KSP style). Stores
--- per-tier node strokes / unlock chips / connector frames so _refreshTree can recolour them.
+-- Lay out the BRANCHING tech graph: one box per node placed on its (col,row) grid cell, each
+-- node wired back to its prerequisite(s) with right-angle (elbow) connectors. Stores per-node
+-- UI handles and per-node incoming-edge frames so _refreshTree can recolour them by state.
 function TechController:_buildGraph(parent)
-	local NODE = 58
-	local COL_W = 150
-	local ROW_H = 74
-	local PAD_X = 46
-	local PAD_TOP = 68
+	local NODE_W = 126
+	local NODE_H = 58
+	local COL_W = 174
+	local ROW_H = 78
+	local PAD_X = 28
+	local PAD_TOP = 22
 
-	local nTiers = #TechTree.tiers
-	local maxRows = 1
-	for _, tier in ipairs(TechTree.tiers) do
-		maxRows = math.max(maxRows, #tier.parts)
+	local maxCol, maxRow = 0, 0
+	for _, n in ipairs(TechTree.nodes) do
+		maxCol = math.max(maxCol, n.col)
+		maxRow = math.max(maxRow, n.row)
 	end
-	parent.CanvasSize = UDim2.fromOffset(PAD_X * 2 + (nTiers - 1) * COL_W + NODE, PAD_TOP + maxRows * ROW_H + 30)
+	parent.CanvasSize = UDim2.fromOffset(PAD_X * 2 + maxCol * COL_W + NODE_W, PAD_TOP * 2 + maxRow * ROW_H + NODE_H)
 
-	local function colX(i)
-		return PAD_X + (i - 1) * COL_W
-	end
-	local function colStartY(n)
-		return PAD_TOP + (maxRows - n) * ROW_H / 2
+	local function nodeXY(n)
+		return PAD_X + n.col * COL_W, PAD_TOP + n.row * ROW_H
 	end
 
-	-- Node centres per tier (used to wire the connectors).
-	local centres = {}
-	for i, tier in ipairs(TechTree.tiers) do
-		local n = #tier.parts
-		local sy, x, cs = colStartY(n), colX(i), {}
-		for j = 1, n do
-			local y = sy + (j - 1) * ROW_H
-			cs[j] = { x = x, y = y, cy = y + NODE / 2 }
-		end
-		centres[i] = cs
-	end
-
-	-- Thin line segment helper (a Frame). Connectors are drawn first so nodes sit on top.
+	-- Thin line segment helper (a Frame). Edges are drawn first so the node boxes sit on top.
 	local function seg(x, y, w, h)
 		local f = Instance.new("Frame")
 		f.Position = UDim2.fromOffset(math.floor(x), math.floor(y))
@@ -311,102 +297,87 @@ function TechController:_buildGraph(parent)
 		return f
 	end
 
-	self._tierConns = {}
-	for i = 2, nTiers do
-		local leftRight = colX(i - 1) + NODE -- right edge of the previous column
-		local rightLeft = colX(i) -- left edge of this column
-		local railX = (leftRight + rightLeft) / 2
-		local conns, minY, maxY = {}, math.huge, -math.huge
-		for _, c in ipairs(centres[i - 1]) do
-			conns[#conns + 1] = seg(leftRight, c.cy - 1, railX - leftRight, 2)
-			minY, maxY = math.min(minY, c.cy), math.max(maxY, c.cy)
-		end
-		for _, c in ipairs(centres[i]) do
-			conns[#conns + 1] = seg(railX, c.cy - 1, rightLeft - railX, 2)
-			minY, maxY = math.min(minY, c.cy), math.max(maxY, c.cy)
-		end
-		conns[#conns + 1] = seg(railX - 1, minY, 2, maxY - minY) -- vertical bus
-		self._tierConns[i] = conns
-	end
-
-	self._tierNodes = {}
-	for i, tier in ipairs(TechTree.tiers) do
-		local x = colX(i)
-		local headerX = x - (COL_W - NODE) / 2
-
-		local hdr = Instance.new("TextLabel")
-		hdr.Position = UDim2.fromOffset(headerX, 8)
-		hdr.Size = UDim2.fromOffset(COL_W, 18)
-		hdr.BackgroundTransparency = 1
-		hdr.Font = Enum.Font.GothamBold
-		hdr.TextSize = 13
-		hdr.TextColor3 = TEXT
-		hdr.Text = tier.name
-		hdr.ZIndex = 2
-		hdr.Parent = parent
-
-		local chip = Instance.new("TextButton")
-		chip.Position = UDim2.fromOffset(headerX + (COL_W - 96) / 2, 30)
-		chip.Size = UDim2.fromOffset(96, 22)
-		chip.BackgroundColor3 = GREY
-		chip.BorderSizePixel = 0
-		chip.Font = Enum.Font.GothamBold
-		chip.TextSize = 12
-		chip.TextColor3 = Color3.fromRGB(255, 255, 255)
-		chip.Text = "LOCKED"
-		chip.ZIndex = 2
-		corner(chip, 6)
-		chip.Parent = parent
-		chip.Activated:Connect(function()
-			self:_requestUnlock(tier.id)
-		end)
-
-		local strokes = {}
-		for j, partId in ipairs(tier.parts) do
-			local def = Catalog.get(partId)
-			local c = centres[i][j]
-
-			local node = Instance.new("TextButton")
-			node.Position = UDim2.fromOffset(c.x, c.y)
-			node.Size = UDim2.fromOffset(NODE, NODE)
-			node.BackgroundColor3 = Color3.fromRGB(20, 26, 22)
-			node.AutoButtonColor = true
-			node.BorderSizePixel = 0
-			node.Text = ""
-			node.ZIndex = 2
-			corner(node, 8)
-			node.Parent = parent
-			node.Activated:Connect(function()
-				self:_requestUnlock(tier.id)
-			end)
-
-			local stroke = Instance.new("UIStroke")
-			stroke.Thickness = 2
-			stroke.Color = GREY
-			stroke.Parent = node
-			strokes[#strokes + 1] = stroke
-
-			if def then
-				local thumb = PartPreview.thumbnail(def)
-				thumb.Size = UDim2.fromOffset(NODE - 10, NODE - 10)
-				thumb.Position = UDim2.fromOffset(5, 5)
-				thumb.ZIndex = 3
-				thumb.Parent = node
-			else
-				local lbl = Instance.new("TextLabel")
-				lbl.Size = UDim2.fromScale(1, 1)
-				lbl.BackgroundTransparency = 1
-				lbl.Font = Enum.Font.Code
-				lbl.TextSize = 9
-				lbl.TextWrapped = true
-				lbl.TextColor3 = DIM
-				lbl.Text = partId
-				lbl.ZIndex = 3
-				lbl.Parent = node
+	-- ---- edges (parent right edge -> elbow -> child left edge) ----
+	self._edges = {} -- [childId] = { frames... }
+	for _, n in ipairs(TechTree.nodes) do
+		for _, reqId in ipairs(n.requires) do
+			local pnode = TechTree.nodeById(reqId)
+			if pnode then
+				local px, py = nodeXY(pnode)
+				local cx, cy = nodeXY(n)
+				local x1, y1 = px + NODE_W, py + NODE_H / 2 -- parent right-centre
+				local x2, y2 = cx, cy + NODE_H / 2 -- child left-centre
+				local midX = (x1 + x2) / 2
+				local e = self._edges[n.id] or {}
+				e[#e + 1] = seg(x1, y1 - 1, midX - x1 + 1, 2) -- out of parent
+				e[#e + 1] = seg(midX - 1, math.min(y1, y2), 2, math.abs(y2 - y1) + 2) -- vertical run
+				e[#e + 1] = seg(midX, y2 - 1, x2 - midX, 2) -- into child
+				self._edges[n.id] = e
 			end
 		end
+	end
 
-		self._tierNodes[i] = { strokes = strokes, chip = chip }
+	-- ---- node boxes (icon + name + cost/status) ----
+	self._nodeUI = {} -- [id] = { stroke, status }
+	for _, n in ipairs(TechTree.nodes) do
+		local x, y = nodeXY(n)
+
+		local box = Instance.new("TextButton")
+		box.Position = UDim2.fromOffset(x, y)
+		box.Size = UDim2.fromOffset(NODE_W, NODE_H)
+		box.BackgroundColor3 = Color3.fromRGB(20, 26, 22)
+		box.AutoButtonColor = true
+		box.BorderSizePixel = 0
+		box.Text = ""
+		box.ZIndex = 2
+		corner(box, 8)
+		box.Parent = parent
+		box.Activated:Connect(function()
+			self:_requestUnlock(n.id)
+		end)
+
+		local stroke = Instance.new("UIStroke")
+		stroke.Thickness = 2
+		stroke.Color = GREY
+		stroke.Parent = box
+
+		local def = Catalog.get(n.parts[1]) -- representative icon (first part)
+		if def then
+			local thumb = PartPreview.thumbnail(def)
+			thumb.Size = UDim2.fromOffset(NODE_H - 12, NODE_H - 12)
+			thumb.Position = UDim2.fromOffset(6, 6)
+			thumb.ZIndex = 3
+			thumb.Parent = box
+		end
+
+		local name = Instance.new("TextLabel")
+		name.Position = UDim2.fromOffset(NODE_H, 6)
+		name.Size = UDim2.fromOffset(NODE_W - NODE_H - 6, 30)
+		name.BackgroundTransparency = 1
+		name.Font = Enum.Font.GothamBold
+		name.TextSize = 12
+		name.TextWrapped = true
+		name.TextXAlignment = Enum.TextXAlignment.Left
+		name.TextYAlignment = Enum.TextYAlignment.Top
+		name.TextColor3 = TEXT
+		name.Text = n.name
+		name.ZIndex = 3
+		name.Parent = box
+
+		local status = Instance.new("TextLabel")
+		status.AnchorPoint = Vector2.new(0, 1)
+		status.Position = UDim2.fromOffset(NODE_H, NODE_H - 6)
+		status.Size = UDim2.fromOffset(NODE_W - NODE_H - 6, 16)
+		status.BackgroundTransparency = 1
+		status.Font = Enum.Font.GothamBold
+		status.TextSize = 12
+		status.TextXAlignment = Enum.TextXAlignment.Left
+		status.TextColor3 = DIM
+		status.Text = ""
+		status.ZIndex = 3
+		status.Parent = box
+
+		self._nodeUI[n.id] = { stroke = stroke, status = status }
 	end
 end
 
@@ -417,48 +388,42 @@ function TechController:_setResearchVisible(v)
 end
 
 function TechController:_refreshTree()
-	if not self._tierNodes then
+	if not self._nodeUI then
 		return
 	end
 	local sci = self:GetScience()
 	if self._sciLabel then
 		self._sciLabel.Text = ("Science: %d"):format(sci)
 	end
+	local unlocked = self._state.unlocked or {}
+	local SCI_TXT = Color3.fromRGB(150, 235, 170)
 	local LINE_ON = Color3.fromRGB(80, 200, 120)
 	local LINE_OFF = Color3.fromRGB(48, 60, 54)
-	for i, tier in ipairs(TechTree.tiers) do
-		local t = self._tierNodes[i]
-		if t then
-			local unlocked = self._state.unlocked[tier.id]
-			local prev = TechTree.prevTierId(tier.id)
-			local available = (not unlocked) and (not prev or self._state.unlocked[prev])
-
-			local strokeColor, chipColor, chipText, chipActive
-			if unlocked then
-				strokeColor, chipColor, chipText, chipActive = GREEN, GREEN, "UNLOCKED", false
+	for _, n in ipairs(TechTree.nodes) do
+		local ui = self._nodeUI[n.id]
+		if ui then
+			local isUnlocked = unlocked[n.id] == true
+			local available = (not isUnlocked) and TechTree.requiresMet(n, unlocked)
+			if isUnlocked then
+				ui.stroke.Color = GREEN
+				ui.status.Text = "Researched"
+				ui.status.TextColor3 = SCI_TXT
 			elseif available then
-				local afford = sci >= tier.cost
-				strokeColor = ACCENT
-				chipColor = afford and GREEN or GREY
-				chipText = (tier.cost == 0) and "FREE" or ("Unlock %d"):format(tier.cost)
-				chipActive = afford
+				local afford = sci >= n.cost
+				ui.stroke.Color = ACCENT
+				ui.status.Text = (n.cost == 0) and "FREE" or (("%d pts"):format(n.cost))
+				ui.status.TextColor3 = afford and SCI_TXT or DIM
 			else
-				strokeColor, chipColor, chipText, chipActive = GREY, GREY, ("Locked  %d"):format(tier.cost), false
+				ui.stroke.Color = GREY
+				ui.status.Text = ("%d pts"):format(n.cost)
+				ui.status.TextColor3 = Color3.fromRGB(110, 116, 128)
 			end
-
-			for _, s in ipairs(t.strokes) do
-				s.Color = strokeColor
-			end
-			t.chip.Text = chipText
-			t.chip.BackgroundColor3 = chipColor
-			t.chip.AutoButtonColor = chipActive
-			t.chip.Active = chipActive
-
-			-- Colour the bus that feeds this tier green once it's unlocked.
-			if self._tierConns and self._tierConns[i] then
-				for _, f in ipairs(self._tierConns[i]) do
-					f.BackgroundColor3 = unlocked and LINE_ON or LINE_OFF
-				end
+		end
+		-- Incoming edge(s) light up green once this node is researched (the path was taken).
+		if self._edges and self._edges[n.id] then
+			local on = unlocked[n.id] == true
+			for _, f in ipairs(self._edges[n.id]) do
+				f.BackgroundColor3 = on and LINE_ON or LINE_OFF
 			end
 		end
 	end
