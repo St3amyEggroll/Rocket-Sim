@@ -494,22 +494,24 @@ function CraftRenderer:_render(state, info)
 		end
 	end
 
-	local throttle = (info and info.throttle) or 0
-	local burning = info and info.powered and throttle > 0
+	-- Flame intensity = thrustLevel (tracks throttle for liquids, but stays high for an ignited
+	-- solid that can't be throttled), so a firing SRB plumes even at zero throttle.
+	local vthr = (info and info.thrustLevel) or 0
+	local burning = vthr > 0
 	if burning then
 		self._flame.Transparency = 0.2
-		self._flame.Size = Vector3.new(self._flame.Size.X, 8 + 26 * throttle, self._flame.Size.Z)
+		self._flame.Size = Vector3.new(self._flame.Size.X, 8 + 26 * vthr, self._flame.Size.Z)
 		self._flameLight.Enabled = true
-		self._flameLight.Brightness = 4 + 4 * throttle
+		self._flameLight.Brightness = 4 + 4 * vthr
 	else
 		self._flame.Transparency = 1
 		self._flameLight.Enabled = false
 	end
-	-- Exhaust + smoke scale with throttle; in air the smoke billows (launch dust).
+	-- Exhaust + smoke scale with thrust; in air the smoke billows (launch dust).
 	if self._exhaust then
 		local thick = info and info.inAtmo
-		self._exhaust.Rate = burning and (90 * throttle) or 0
-		self._smoke.Rate = burning and ((thick and 60 or 22) * throttle) or 0
+		self._exhaust.Rate = burning and (90 * vthr) or 0
+		self._smoke.Rate = burning and ((thick and 60 or 22) * vthr) or 0
 	end
 
 	if self._chute then

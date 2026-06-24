@@ -859,6 +859,7 @@ function VehicleController:_computeActiveEngines()
 					z = p.cf.Z,
 					thrust = p.def.thrust or 0,
 					ve = p.def.exhaustVelocity or 1,
+					solid = p.def.solid == true, -- fires at full thrust, ignores throttle
 					section = sec,
 					index = i,
 				}
@@ -879,10 +880,11 @@ function VehicleController:GetCurrentMass(): number
 end
 
 -- Net thrust along the nose / current mass (off-axis cancellation handled by the torque).
+-- Solid boosters ignore the throttle and always contribute FULL thrust once ignited.
 function VehicleController:GetThrustAccel(throttle): number
 	local t = 0
 	for _, e in ipairs(self:GetActiveEngines()) do
-		t += e.thrust
+		t += e.thrust * (e.solid and 1 or throttle)
 	end
 	if t <= 0 then
 		return 0
@@ -891,21 +893,24 @@ function VehicleController:GetThrustAccel(throttle): number
 	if m <= 0 then
 		return 0
 	end
-	return t * throttle / m
+	return t / m
 end
 
+-- Burn fuel from each firing engine's section. Solids burn at full rate regardless of the
+-- throttle (so they can't be throttled down or shut off -- they run to depletion).
 function VehicleController:ConsumeFuel(dt, throttle)
-	if throttle <= 0 then
-		return
-	end
+	local burned = false
 	for _, e in ipairs(self:GetActiveEngines()) do
-		local sec = e.section
-		if sec then
-			local flow = (e.thrust / math.max(e.ve, 1e-3)) * throttle * dt
-			self._sectionFuel[sec] = math.max(0, (self._sectionFuel[sec] or 0) - flow)
+		local eff = e.solid and 1 or throttle
+		if eff > 0 and e.section then
+			local flow = (e.thrust / math.max(e.ve, 1e-3)) * eff * dt
+			self._sectionFuel[e.section] = math.max(0, (self._sectionFuel[e.section] or 0) - flow)
+			burned = true
 		end
 	end
-	self._runtimeVer += 1 -- fuel (hence mass / thrust / CoM) changed: invalidate caches
+	if burned then
+		self._runtimeVer += 1 -- fuel (hence mass / thrust / CoM) changed: invalidate caches
+	end
 end
 
 function VehicleController:CanStage(): boolean

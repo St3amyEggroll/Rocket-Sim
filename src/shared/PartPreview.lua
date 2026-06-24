@@ -83,6 +83,11 @@ function PartPreview.geometry(model, def)
 		cyl(model, h * 0.72, r * 0.86, def.color, METAL, h * 0.12) -- body
 		cyl(model, h * 0.2, r * 0.5, DARK, METAL, -h * 0.34) -- nozzle throat
 		cyl(model, h * 0.16, r * 0.74, DARK, METAL, -h * 0.5) -- flared bell
+	elseif sh == "nose" then
+		-- A streamlined nose cap: a short base ring + an ogive (a stretched dome) that seats on
+		-- the part below (bottom ~ -h/2) and tapers to a point above.
+		cyl(model, h * 0.2, r, def.color, SMOOTH, -h * 0.4)
+		ball(model, r * 2, h * 1.3, r * 2, def.color, SMOOTH, h * 0.15)
 	elseif sh == "parachute" then
 		cyl(model, h, r, def.color, SMOOTH, -h * 0.1)
 		ball(model, r * 1.5, r * 0.8, r * 1.5, Color3.fromRGB(220, 96, 76), SMOOTH, h * 0.45)

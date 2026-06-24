@@ -360,12 +360,12 @@ function FlightController:_updateRotation(dt, pos, vel, powered, throttle)
 	-- Off-centre thrust: each firing engine pushes along the nose from its own lateral
 	-- position, so an asymmetric engine layout (a lone side booster, an empty booster
 	-- still attached) torques the craft about the centre of mass.
-	if powered and throttle > 0 then
+	if powered then
 		local cx, cz = prof.comX or 0, prof.comZ or 0
 		local tx, tz = 0, 0
 		for _, e in ipairs(self._vehicle:GetActiveEngines()) do
 			local dx, dz = e.x - cx, e.z - cz
-			local f = e.thrust * throttle
+			local f = e.thrust * (e.solid and 1 or throttle) -- solids push at full regardless of throttle
 			tx += -dz * f -- torque about the body right axis (pitch)
 			tz += dx * f -- torque about the body up axis (yaw)
 		end
@@ -464,6 +464,7 @@ function FlightController:_step(rawDt)
 	local warp = self._input:GetTimeWarp()
 
 	local powered = false
+	local solidFiring = false
 	local sas
 
 	-- Are we in air? (drag + reentry live here, and warp is pinned to 1x.)
@@ -479,7 +480,15 @@ function FlightController:_step(rawDt)
 		sas = self._input:GetSAS()
 	else
 		local thrustAccel = self._vehicle:GetThrustAccel(throttle)
-		powered = throttle > 0 and thrustAccel > 0
+		-- thrustAccel already folds in throttle (and full thrust for solids), so >0 means real
+		-- thrust -- this lets an ignited SRB keep firing even at zero throttle (can't shut off).
+		powered = thrustAccel > 0
+		for _, e in ipairs(self._vehicle:GetActiveEngines()) do
+			if e.solid then
+				solidFiring = true
+				break
+			end
+		end
 		sas = self:_updateRotation(dt, pos, self._state.velocity, powered, throttle)
 		local nose = self._attitude.LookVector
 
@@ -549,6 +558,9 @@ function FlightController:_step(rawDt)
 		warp = effWarp,
 		sas = sas,
 		powered = powered,
+		-- Flame intensity for the renderer: a firing solid shows a strong plume even at zero
+		-- throttle (it can't be throttled), otherwise it tracks the throttle.
+		thrustLevel = powered and (solidFiring and math.max(throttle, 0.9) or throttle) or 0,
 		status = self._status,
 		inAtmo = inAtmo,
 		reentry = reentry,

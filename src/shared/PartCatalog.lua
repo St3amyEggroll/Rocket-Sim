@@ -64,6 +64,29 @@ PartCatalog.parts = {
 		shape = "tank",
 		drag = 0.25,
 	},
+	TankXXL = {
+		id = "TankXXL",
+		name = "Fuel Tank (XXL)",
+		category = "fuel",
+		mass = 1.1,
+		fuel = 18.0,
+		height = 18,
+		radius = 3,
+		color = Color3.fromRGB(243, 246, 250),
+		shape = "tank",
+		drag = 0.3,
+	},
+	NoseCone = {
+		id = "NoseCone",
+		name = "Nose Cone",
+		category = "structure",
+		mass = 0.12,
+		height = 3,
+		radius = 3,
+		color = Color3.fromRGB(214, 218, 226),
+		shape = "nose",
+		drag = 0.04, -- streamlined: very low drag, so it caps a stack and pulls the CoP DOWN
+	},
 	EngineMain = {
 		id = "EngineMain",
 		name = "Main Engine",
@@ -87,6 +110,19 @@ PartCatalog.parts = {
 		height = 4.5,
 		radius = 3,
 		color = Color3.fromRGB(78, 80, 88),
+		shape = "engine",
+		drag = 0.3,
+	},
+	EngineXL = {
+		id = "EngineXL",
+		name = "Heavy-Lift Engine",
+		category = "engine",
+		mass = 3.2,
+		thrust = 1500,
+		exhaustVelocity = 205,
+		height = 5.5,
+		radius = 3,
+		color = Color3.fromRGB(66, 68, 76),
 		shape = "engine",
 		drag = 0.3,
 	},
@@ -124,12 +160,14 @@ PartCatalog.parts = {
 		mass = 0.9,
 		thrust = 430,
 		exhaustVelocity = 160,
-		fuel = 7.0, -- self-contained: an engine that carries its own solid fuel
+		fuel = 10.0, -- self-contained: an engine that carries its own solid fuel
 		height = 9,
 		radius = 1.6,
 		color = Color3.fromRGB(206, 200, 188),
 		shape = "engine",
 		drag = 0.4,
+		solid = true, -- ignites when its stage fires and burns at FULL thrust to depletion;
+		-- throttle has no effect and it can't be shut off or restarted (a real SRB).
 	},
 	Parachute = {
 		id = "Parachute",
@@ -200,11 +238,14 @@ PartCatalog.parts = {
 -- Display order in the VAB palette.
 PartCatalog.order = {
 	"Pod",
+	"NoseCone",
 	"TankS",
 	"TankL",
 	"TankXL",
+	"TankXXL",
 	"EngineMain",
 	"EngineLarge",
+	"EngineXL",
 	"EngineVac",
 	"EngineRadial",
 	"SRB",
