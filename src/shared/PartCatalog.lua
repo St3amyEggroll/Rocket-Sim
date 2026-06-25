@@ -351,6 +351,18 @@ PartCatalog.parts = {
 		radial = true,
 		ecStorage = 400, -- electric-charge storage
 	},
+	HeatShield = {
+		id = "HeatShield",
+		name = "Heat Shield",
+		category = "structure",
+		mass = 0.3,
+		height = 1,
+		radius = 3,
+		color = Color3.fromRGB(58, 48, 44),
+		shape = "heatshield",
+		drag = 0.5, -- a broad blunt base (mount it under the craft, base-first reentry)
+		ablator = 800, -- soaks up reentry heat until spent
+	},
 }
 
 -- Display order in the VAB palette.
@@ -381,6 +393,7 @@ PartCatalog.order = {
 	"DockingPort",
 	"SolarPanel",
 	"Battery",
+	"HeatShield",
 }
 
 function PartCatalog.get(id)

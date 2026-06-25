@@ -231,6 +231,19 @@ Config.RENDER = {
 
 -- Docking: leave a craft (with a docking port) in a stable orbit; it persists as a "vessel"
 -- you can rendezvous with on later flights. Two ports that meet slowly enough latch together.
+-- Reentry heat: the hull warms from aerodynamic heating (the reentry intensity the flight loop
+-- already derives from dynamic pressure). A heat shield's ablator soaks up most of it until
+-- depleted; sustained temperature past `critical` burns the craft up. Cools toward ambient.
+Config.HEAT = {
+	ambient = 300, -- resting hull temperature (K)
+	critical = 1100, -- above this for `burnSeconds` -> burn-up
+	heatRate = 1400, -- K/s of heating at full reentry intensity
+	coolRate = 1.2, -- Newton cooling coefficient toward ambient (per second)
+	shieldAbsorb = 0.88, -- fraction of incoming heat an ablating shield soaks up
+	ablatorBurn = 0.018, -- ablator units consumed per (K/s absorbed)
+	burnSeconds = 2.5, -- seconds above critical before the craft burns up
+}
+
 -- Electric charge: a power economy. Command pods + batteries store charge; solar panels
 -- generate it when sunlit; the reaction wheels (SAS attitude authority) draw it. At zero charge
 -- the wheels go dead -- you keep only engine-gimbal steering while burning, until solar recharges.

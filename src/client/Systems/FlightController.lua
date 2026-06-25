@@ -175,6 +175,7 @@ function FlightController:_onMode(mode)
 	}
 	self._attitude = self:_launchAttitude()
 	self._omega = Vector3.zero
+	self._heatTimer = 0
 	self._landed = true
 	self._crashed = false
 	self._status = (mode == "Flight") and "Landed" or "VAB"
@@ -428,6 +429,8 @@ function FlightController:_fire(extra)
 	extra.isMenu = self._mode:IsMenu()
 	extra.missionTime = self._missionTime
 	extra.charge = self._vehicle:GetChargeFrac()
+	extra.hullTemp = self._vehicle:GetHullTemp()
+	extra.ablator = self._vehicle:GetAblatorFrac()
 	extra.nose = self._attitude.LookVector
 	extra.attitude = self._attitude
 	extra.mapMode = self._input:GetMapMode()
@@ -596,6 +599,19 @@ function FlightController:_step(rawDt)
 	-- reaction wheels + avionics drain over real time.
 	local sunFactor = self:_sunlitFactor(self._state.position, self:GetSunDir())
 	self._vehicle:UpdatePower(dt, dt * effWarp, sunFactor, self._ctrlEffort or 0)
+
+	-- Reentry heating: warm the hull (a heat shield's ablator soaks it up); sustained critical
+	-- temperature without enough shielding burns the craft up.
+	local hullTemp = self._vehicle:ApplyHeat(dt, reentry)
+	if hullTemp > Config.HEAT.critical then
+		self._heatTimer = (self._heatTimer or 0) + dt
+		if self._heatTimer > Config.HEAT.burnSeconds then
+			self._crashed = true
+			self._status = "Crashed"
+		end
+	else
+		self._heatTimer = 0
+	end
 
 	self._powered = powered
 	self._origin:UpdateForBody(vadd(self._state.position, self:_bodyCenter()))

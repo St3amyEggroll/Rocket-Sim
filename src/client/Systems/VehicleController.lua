@@ -723,6 +723,8 @@ end
 function VehicleController:ResetRuntime()
 	self._stageIndex = 1
 	self._charge = nil -- nil -> _computePower refills to full capacity
+	self._ablator = nil -- nil -> refills to full
+	self._hullTemp = Config.HEAT.ambient
 	self._sectionFuel = {}
 	for root, cap in pairs(self._sectionCapacity or {}) do
 		self._sectionFuel[root] = cap
@@ -734,20 +736,56 @@ end
 -- Electric-charge capacity + generation of the active craft. Refills to full only on a reset
 -- (when _charge is nil); otherwise it just clamps the live charge to the new capacity.
 function VehicleController:_computePower()
-	local cap, gen = 0, 0
+	local cap, gen, abl = 0, 0, 0
 	for i, p in ipairs(self._parts) do
 		if self:_isActive(i) then
 			cap += p.def.ecStorage or 0
 			gen += p.def.ecGen or 0
+			abl += p.def.ablator or 0
 		end
 	end
 	self._ecCap = cap
 	self._ecGenMax = gen
+	self._ablatorCap = abl
 	if self._charge == nil then
 		self._charge = cap
 	elseif self._charge > cap then
 		self._charge = cap
 	end
+	if self._ablator == nil then
+		self._ablator = abl
+	elseif self._ablator > abl then
+		self._ablator = abl
+	end
+end
+
+-- Reentry heating: warm the hull from the reentry intensity (0..1), with an ablating heat
+-- shield soaking up most of it until spent; cools toward ambient. Returns the hull temp (K).
+function VehicleController:ApplyHeat(dt, reentry)
+	local H = Config.HEAT
+	local heatIn = math.max(0, reentry or 0) * H.heatRate
+	if (self._ablator or 0) > 0 and heatIn > 0 then
+		local absorbed = heatIn * H.shieldAbsorb
+		self._ablator = math.max(0, (self._ablator or 0) - absorbed * H.ablatorBurn * dt)
+		heatIn = heatIn - absorbed
+	end
+	local temp = self._hullTemp or H.ambient
+	temp = temp + (heatIn - H.coolRate * (temp - H.ambient)) * dt
+	self._hullTemp = math.max(H.ambient, temp)
+	return self._hullTemp
+end
+
+function VehicleController:GetHullTemp(): number
+	return self._hullTemp or Config.HEAT.ambient
+end
+
+-- Ablator remaining (0..1), or nil if the craft carries no heat shield.
+function VehicleController:GetAblatorFrac()
+	local cap = self._ablatorCap or 0
+	if cap <= 0 then
+		return nil
+	end
+	return math.clamp((self._ablator or 0) / cap, 0, 1)
 end
 
 -- Tick the power balance. Solar generation accrues over MISSION time (so it charges through

@@ -30,8 +30,8 @@ TechTree.nodes = {
 		parts = { "Decoupler" } },
 
 	-- Second ring.
-	{ id = "landing", name = "Landing", col = 2, row = 0, cost = 10, requires = { "aerodynamics" },
-		parts = { "LandingLeg" } },
+	{ id = "landing", name = "Landing & Reentry", col = 2, row = 0, cost = 10, requires = { "aerodynamics" },
+		parts = { "LandingLeg", "HeatShield" } },
 	{ id = "docking", name = "Docking Tech", col = 2, row = 1, cost = 16, requires = { "generalRocketry" },
 		parts = { "DockingPort" } },
 	{ id = "fuelSystems", name = "Fuel Systems", col = 2, row = 2, cost = 8, requires = { "generalRocketry" },

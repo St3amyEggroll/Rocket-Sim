@@ -151,6 +151,10 @@ function PartPreview.geometry(model, def)
 		block(model, Vector3.new(r * 1.2, 0.18, 0.3), STEEL, METAL, CFrame.new(r * 0.9, 0, 0)) -- arm
 		local panel = block(model, Vector3.new(r * 2.6, 0.16, r * 1.5), Color3.fromRGB(36, 64, 140), SMOOTH, CFrame.new(r * 2.0, 0, 0))
 		panel.Reflectance = 0.25
+	elseif sh == "heatshield" then
+		-- A blunt ablative base: a wide shallow dish that seats under the craft (bottom ~ -h/2).
+		cyl(model, h * 0.4, r, Color3.fromRGB(70, 60, 54), SMOOTH, h * 0.2)
+		ball(model, r * 2, h * 1.1, r * 2, def.color, SMOOTH, -h * 0.15) -- domed ablator face
 	elseif sh == "battery" then
 		block(model, Vector3.new(r * 1.0, r * 1.5, r * 1.7), def.color, SMOOTH, CFrame.new(0, 0, 0))
 		block(model, Vector3.new(r * 0.3, r * 0.5, r * 0.5), Color3.fromRGB(232, 196, 60), SMOOTH, CFrame.new(r * 0.5, r * 0.55, 0))

@@ -121,6 +121,7 @@ function HUDController:_build(parent)
 	L.periapsis = newRow(readout, 7, 18, 15)
 	L.ecc = newRow(readout, 8, 18, 15)
 	L.period = newRow(readout, 9, 18, 15)
+	L.heat = newRow(readout, 10, 18, 15)
 
 	-- Vehicle panel (bottom-left).
 	local veh = newPanel(gui, 250, Vector2.new(0, 1), UDim2.new(0, 16, 1, -16))
@@ -217,6 +218,21 @@ function HUDController:_update(state, info)
 	L.throttle.Text = "Throttle:  " .. math.floor(info.throttle * 100 + 0.5) .. "%"
 	L.thrustMode.Text = "SAS:       " .. tostring(info.sas)
 	L.warp.Text = "Warp:      " .. (info.warp or 1) .. "x"
+
+	local hot = info.hullTemp or Config.HEAT.ambient
+	local abl = info.ablator
+	if hot > Config.HEAT.ambient + 30 or abl then
+		local txt = string.format("Hull:      %dK", math.floor(hot + 0.5))
+		if abl then
+			txt = txt .. string.format("  Abl %d%%", math.floor(abl * 100 + 0.5))
+		end
+		L.heat.Text = txt
+		L.heat.TextColor3 = (hot > Config.HEAT.critical) and Color3.fromRGB(255, 90, 90)
+			or (hot > 700) and Color3.fromRGB(255, 165, 95)
+			or Color3.fromRGB(150, 200, 230)
+	else
+		L.heat.Text = ""
+	end
 
 	local charge = info.charge
 	if charge then
