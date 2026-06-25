@@ -17,7 +17,9 @@ local DataStoreService = game:GetService("DataStoreService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local TechTree = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("TechTree"))
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local TechTree = require(Shared:WaitForChild("TechTree"))
+local Science = require(Shared:WaitForChild("Science"))
 
 local SaveServer = {}
 
@@ -38,7 +40,8 @@ local function defaultProfile(name)
 		science = 0,
 		unlocked = { basics = true },
 		milestones = {},
-		craft = nil, -- reserved: serialized VAB design
+		experiments = {}, -- collected biome/situation science keys (Science.key -> true)
+		craft = nil, -- reserved: serialized build-mode design
 		vessels = {}, -- reserved: in-orbit craft (for docking)
 	}
 end
@@ -48,6 +51,7 @@ local function normalize(p)
 	p.unlocked = (type(p.unlocked) == "table") and p.unlocked or {}
 	p.unlocked.basics = true
 	p.milestones = (type(p.milestones) == "table") and p.milestones or {}
+	p.experiments = (type(p.experiments) == "table") and p.experiments or {}
 	p.vessels = (type(p.vessels) == "table") and p.vessels or {}
 	return p
 end
@@ -189,6 +193,36 @@ local function onUnlockTier(player, nodeId)
 	pushState(player)
 end
 
+-- Biome/situation science: grant the reading's value once per { experiment, body, biome,
+-- situation } key. The flight sim is client-side, so the situation report is trusted; the
+-- server still owns the value (shared Science table) and the one-time dedup.
+local function onRunExperiment(player, report)
+	local p = profiles[player.UserId]
+	if not p or type(report) ~= "table" then
+		return
+	end
+	local expId, body, situation, biome = report.exp, report.body, report.situation, report.biome
+	if type(expId) ~= "string" or type(body) ~= "string" or type(situation) ~= "string" then
+		return
+	end
+	if biome ~= nil and type(biome) ~= "string" then
+		return
+	end
+	local value = Science.value(expId, body, situation)
+	if value <= 0 then
+		return
+	end
+	local key = Science.key(expId, body, biome, situation)
+	p.experiments = p.experiments or {}
+	if p.experiments[key] then
+		return -- already collected this reading
+	end
+	p.experiments[key] = true
+	p.science += value
+	saveActive(player)
+	pushState(player)
+end
+
 -- Save the current craft design into the active slot (reserved for the craft serializer).
 local function onSaveCraft(player, craft)
 	local p = profiles[player.UserId]
@@ -224,6 +258,7 @@ function SaveServer.start()
 	end
 	local listFn, loadFn, newFn, delFn = rf("ListSaves"), rf("LoadSave"), rf("NewGame"), rf("DeleteSave")
 	local stateEv, reportEv, unlockEv, craftEv = re("State"), re("ReportMilestone"), re("UnlockTier"), re("SaveCraft")
+	local experimentEv = re("RunExperiment")
 	folder.Parent = ReplicatedStorage
 	remotes = { state = stateEv }
 
@@ -234,6 +269,7 @@ function SaveServer.start()
 	reportEv.OnServerEvent:Connect(onReportMilestone)
 	unlockEv.OnServerEvent:Connect(onUnlockTier)
 	craftEv.OnServerEvent:Connect(onSaveCraft)
+	experimentEv.OnServerEvent:Connect(onRunExperiment)
 	stateEv.OnServerEvent:Connect(function(player)
 		pushState(player) -- client re-request (covers a late client)
 	end)

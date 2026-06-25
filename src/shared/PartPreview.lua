@@ -123,6 +123,20 @@ function PartPreview.geometry(model, def)
 		block(model, Vector3.new(r * 1.1, 1.3, r * 0.7), def.color, METAL, CFrame.new(0, 0.6, 0)) -- mount
 		block(model, Vector3.new(0.32, 2.8, 0.32), STEEL, METAL, CFrame.new(0.7, -0.7, 0) * CFrame.Angles(0, 0, math.rad(26))) -- strut
 		block(model, Vector3.new(1.5, 0.32, 0.8), DARK, SMOOTH, CFrame.new(1.25, -2.0, 0)) -- foot
+	elseif sh == "instrument" then
+		-- A small science gizmo: a boxy housing with a sensor dish on top (built along +X so it
+		-- faces outward when surface-mounted on a craft).
+		block(model, Vector3.new(r * 1.0, r * 1.5, r * 1.3), def.color, SMOOTH, CFrame.new(0, 0, 0))
+		block(model, Vector3.new(r * 0.5, r * 0.4, r * 1.7), DARK, SMOOTH, CFrame.new(r * 0.5, 0, 0)) -- mount neck
+		ball(model, r * 1.3, r * 1.3, r * 1.3, STEEL, METAL, 0) -- sensor head
+		local dish = part(model, {
+			Shape = Enum.PartType.Cylinder,
+			Size = Vector3.new(r * 0.3, r * 1.6, r * 1.6),
+			Color = Color3.fromRGB(220, 224, 230),
+			Material = METAL,
+			CFrame = CFrame.new(r * 1.1, 0, 0),
+		})
+		dish.Reflectance = 0.1
 	else
 		-- fuel tank: body + thin end rings for detail
 		cyl(model, h, r, def.color, SMOOTH, 0)

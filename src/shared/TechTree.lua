@@ -19,11 +19,11 @@ TechTree.nodes = {
 	-- Root: the bare minimum to fly. Free + unlocked from the start (id kept as "basics" so
 	-- existing saves / the default profile's { basics = true } still seed the root).
 	{ id = "basics", name = "Start", col = 0, row = 3, cost = 0, requires = {},
-		parts = { "Pod", "EngineMain", "TankS", "Parachute" } },
+		parts = { "Pod", "EngineMain", "TankS", "Parachute", "Thermometer" } },
 
 	-- First ring: three independent directions branching off the root.
 	{ id = "aerodynamics", name = "Aerodynamics", col = 1, row = 1, cost = 3, requires = { "basics" },
-		parts = { "Fin", "Winglet", "NoseCone" } },
+		parts = { "Fin", "Winglet", "NoseCone", "Barometer" } },
 	{ id = "generalRocketry", name = "General Rocketry", col = 1, row = 3, cost = 4, requires = { "basics" },
 		parts = { "TankM", "TankL", "EngineSmall" } },
 	{ id = "engineering", name = "Engineering", col = 1, row = 5, cost = 5, requires = { "basics" },

@@ -285,6 +285,32 @@ PartCatalog.parts = {
 		radial = true, -- surface-attaches to a body's side
 		landingLeg = true, -- a set of legs makes touchdown more forgiving
 	},
+	Thermometer = {
+		id = "Thermometer",
+		name = "Thermometer",
+		category = "structure",
+		mass = 0.05,
+		height = 0, -- a small side mount
+		radius = 0.8,
+		color = Color3.fromRGB(182, 186, 194),
+		shape = "instrument",
+		drag = 0.03,
+		radial = true, -- surface-attaches to a body's side
+		experiment = "thermometer", -- "Run Experiment" collects a Temperature Scan here
+	},
+	Barometer = {
+		id = "Barometer",
+		name = "Barometer",
+		category = "structure",
+		mass = 0.06,
+		height = 0,
+		radius = 0.8,
+		color = Color3.fromRGB(150, 172, 202),
+		shape = "instrument",
+		drag = 0.03,
+		radial = true,
+		experiment = "barometer", -- a Pressure Scan (atmosphere only)
+	},
 }
 
 -- Display order in the VAB palette.
@@ -310,6 +336,8 @@ PartCatalog.order = {
 	"Decoupler",
 	"RadialDecoupler",
 	"LandingLeg",
+	"Thermometer",
+	"Barometer",
 }
 
 function PartCatalog.get(id)
