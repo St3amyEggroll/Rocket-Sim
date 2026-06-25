@@ -44,6 +44,7 @@ local initOrder = {
 	"ScienceController",
 	"MenuController",
 	"NavBarController",
+	"TrackingController",
 	"MenuFlowController",
 }
 
@@ -76,6 +77,7 @@ local startOrder = {
 	"ScienceController",
 	"MenuController",
 	"NavBarController",
+	"TrackingController",
 	"MenuFlowController",
 	"FlightController",
 }

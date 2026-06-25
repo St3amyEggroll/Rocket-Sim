@@ -50,7 +50,7 @@ function NavBarController:_build(pg)
 	local bar = Instance.new("Frame")
 	bar.AnchorPoint = Vector2.new(0.5, 0)
 	bar.Position = UDim2.new(0.5, 0, 0, 8)
-	bar.Size = UDim2.fromOffset(290, 40)
+	bar.Size = UDim2.fromOffset(404, 40)
 	bar.BackgroundColor3 = BG
 	bar.BackgroundTransparency = 0.15
 	bar.BorderSizePixel = 0
@@ -80,6 +80,9 @@ function NavBarController:_build(pg)
 	self._researchBtn = tab("RESEARCH", 122, 110, function()
 		self._mode:SetMode("Research")
 	end)
+	self._trackBtn = tab("TRACKING", 236, 110, function()
+		self._mode:SetMode("Tracking")
+	end)
 
 	-- Menu button (back to the front-end), set apart on the right.
 	self._menuBtn = Instance.new("TextButton")
@@ -104,12 +107,14 @@ function NavBarController:_refresh()
 		return
 	end
 	local m = self._mode:GetMode()
-	-- The bar belongs to the build/research areas; hidden while flying and in the front-end.
-	self._gui.Enabled = (m == "VAB" or m == "Research")
+	-- The bar belongs to the build/research/tracking areas; hidden while flying and in the menu.
+	self._gui.Enabled = (m == "VAB" or m == "Research" or m == "Tracking")
 	self._buildBtn.BackgroundColor3 = (m == "VAB") and ACTIVE or ROW
 	self._buildBtn.TextColor3 = (m == "VAB") and BG or TEXT
 	self._researchBtn.BackgroundColor3 = (m == "Research") and ACTIVE or ROW
 	self._researchBtn.TextColor3 = (m == "Research") and BG or TEXT
+	self._trackBtn.BackgroundColor3 = (m == "Tracking") and ACTIVE or ROW
+	self._trackBtn.TextColor3 = (m == "Tracking") and BG or TEXT
 end
 
 return NavBarController

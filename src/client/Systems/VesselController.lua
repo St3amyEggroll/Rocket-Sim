@@ -442,6 +442,13 @@ function VesselController:_cycleTarget()
 	self._targetIndex = (self._targetIndex % #self._vessels) + 1
 end
 
+-- Set the target by index (used by the Tracking Station). 0 clears it.
+function VesselController:SetTargetIndex(i)
+	if type(i) == "number" and i >= 0 and i <= #self._vessels then
+		self._targetIndex = i
+	end
+end
+
 function VesselController:_updateReadout(state, info)
 	if not self._gui or not self._gui.Enabled then
 		return

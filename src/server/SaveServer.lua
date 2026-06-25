@@ -266,6 +266,20 @@ local function onDeleteVessel(player, index)
 	end
 end
 
+-- Recover a persisted vessel: remove it and refund a modest science amount (it was a real
+-- investment to fly up there), freeing the slot.
+local RECOVER_SCIENCE = 8
+local function onRecoverVessel(player, index)
+	local p = profiles[player.UserId]
+	if not p or type(index) ~= "number" or not p.vessels or not p.vessels[index] then
+		return
+	end
+	table.remove(p.vessels, index)
+	p.science += RECOVER_SCIENCE
+	saveActive(player)
+	pushState(player)
+end
+
 -- Save the current craft design into the active slot (reserved for the craft serializer).
 local function onSaveCraft(player, craft)
 	local p = profiles[player.UserId]
@@ -303,6 +317,7 @@ function SaveServer.start()
 	local stateEv, reportEv, unlockEv, craftEv = re("State"), re("ReportMilestone"), re("UnlockTier"), re("SaveCraft")
 	local experimentEv = re("RunExperiment")
 	local saveVesselEv, delVesselEv = re("SaveVessel"), re("DeleteVessel")
+	local recoverVesselEv = re("RecoverVessel")
 	folder.Parent = ReplicatedStorage
 	remotes = { state = stateEv }
 
@@ -316,6 +331,7 @@ function SaveServer.start()
 	experimentEv.OnServerEvent:Connect(onRunExperiment)
 	saveVesselEv.OnServerEvent:Connect(onSaveVessel)
 	delVesselEv.OnServerEvent:Connect(onDeleteVessel)
+	recoverVesselEv.OnServerEvent:Connect(onRecoverVessel)
 	stateEv.OnServerEvent:Connect(function(player)
 		pushState(player) -- client re-request (covers a late client)
 	end)
