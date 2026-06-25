@@ -23,6 +23,7 @@ local PRO = Color3.fromRGB(246, 240, 120) -- prograde / retrograde (yellow)
 local RAD = Color3.fromRGB(120, 210, 255) -- radial (cyan)
 local NRM = Color3.fromRGB(200, 130, 255) -- normal (purple)
 local TGT = Color3.fromRGB(245, 130, 210) -- target markers (pink)
+local NODE = Color3.fromRGB(90, 170, 255) -- maneuver-node burn marker (blue)
 local SKY = Color3.fromRGB(74, 150, 224)
 local GROUND = Color3.fromRGB(170, 132, 80)
 local GRID = Color3.fromRGB(238, 243, 250)
@@ -135,6 +136,7 @@ function NavballController:Init() end
 function NavballController:Start()
 	self._input = Registry:Get("InputController")
 	self._vessels = Registry:Get("VesselController")
+	self._maneuver = Registry:Get("ManeuverController")
 	local Flight = Registry:Get("FlightController")
 	local Mode = Registry:Get("GameModeController")
 	self:_build(Players.LocalPlayer:WaitForChild("PlayerGui"))
@@ -237,6 +239,8 @@ function NavballController:_build(parent)
 	self._mTgtAnti = makeMarker(ball, "radialIn", TGT)
 	self._mTgtPro = makeMarker(ball, "prograde", TGT)
 	self._mTgtRetro = makeMarker(ball, "retrograde", TGT)
+	-- Maneuver-node burn marker (blue): the direction to point for the planned burn.
+	self._mNode = makeMarker(ball, "radialOut", NODE)
 
 	-- Throttle bar (left of the ball).
 	local tb = Instance.new("Frame")
@@ -530,6 +534,10 @@ function NavballController:_update(state, info)
 	local tvHas = hasTgt and tvel and tvel.Magnitude > 0.3
 	place(self._mTgtPro, tvHas and tvel.Unit or Vector3.zAxis, right, up, look, tvHas)
 	place(self._mTgtRetro, tvHas and -tvel.Unit or Vector3.zAxis, right, up, look, tvHas)
+
+	-- Maneuver-node burn direction.
+	local burnDir = self._maneuver and self._maneuver:GetBurnDir()
+	place(self._mNode, burnDir or Vector3.zAxis, right, up, look, burnDir ~= nil)
 
 	self._throttleFill.Size = UDim2.new(1, 0, (info.throttle or 0), 0)
 

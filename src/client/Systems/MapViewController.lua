@@ -50,6 +50,7 @@ end
 function MapViewController:Start()
 	self._origin = Registry:Get("FloatingOriginController")
 	self._input = Registry:Get("InputController")
+	self._maneuver = Registry:Get("ManeuverController")
 	local Flight = Registry:Get("FlightController")
 	self._mu = Flight:GetMu()
 	self._bodyRadius = Flight:GetBodyRadius()
@@ -117,6 +118,15 @@ function MapViewController:_buildPool()
 	self._periLabel = markerLabel(self._periMarker, "Pe")
 	markerLabel(self._craftMarker, "CRAFT")
 
+	-- Predicted post-burn orbit (a maneuver node) + the node marker.
+	self._predColor = Color3.fromRGB(255, 150, 60)
+	self._predSegs = {}
+	for i = 1, cfg.segments do
+		self._predSegs[i] = newPart(self._predColor)
+	end
+	self._nodeMarker = newPart(Color3.fromRGB(90, 170, 255), Enum.PartType.Ball)
+	markerLabel(self._nodeMarker, "NODE")
+
 	-- Compressed body for the map (mesh sphere so it can be any size): the ACTIVE body, at
 	-- the centre. Sized + coloured each frame; only shown in map view.
 	local planet = Instance.new("Part")
@@ -174,6 +184,13 @@ function MapViewController:_hideAll()
 	self._periMarker.Transparency = 1
 	self._craftMarker.Transparency = 1
 	self._mapPlanet.Transparency = 1
+	if self._predSegs then
+		for _, seg in ipairs(self._predSegs) do
+			seg.Transparency = 1
+		end
+		self._nodeMarker.Transparency = 1
+		self._nodeMarker:FindFirstChildOfClass("BillboardGui").Enabled = false
+	end
 	for _, b in ipairs({ self._sun, self._terra, self._mun }) do
 		b.marker.Transparency = 1
 		b.label.Parent.Enabled = false
@@ -299,6 +316,7 @@ function MapViewController:_update(state, info)
 	local mapZoom = self._input:GetCameraOrbit().mapZoom or 1
 	local viewR = math.clamp(baseViewR * mapZoom, R * 1.2, Config.SUN.orbitRadius * 1.6)
 	local s = F / viewR
+	self._mapScale = s -- the maneuver handles project against this
 	-- Hide content past the framed region so nothing is drawn beyond the camera's draw range.
 	local cutoff = F * 1.1
 	local segThick = F * 0.0045
@@ -387,6 +405,46 @@ function MapViewController:_update(state, info)
 		self._apoMarker.Transparency = 1
 		self._apoLabel.Parent.Enabled = false
 	end
+
+	-- Predicted post-burn orbit + node marker (a planned maneuver), if one exists.
+	local pred = self._maneuver and self._maneuver:GetPrediction()
+	local nodeBB = self._nodeMarker:FindFirstChildOfClass("BillboardGui")
+	if pred and pred.path then
+		for i = 1, #self._predSegs do
+			local seg = self._predSegs[i]
+			local a, b = pred.path[i], pred.path[i + 1]
+			if not b then
+				seg.Transparency = 1
+			else
+				local ra = rend(Vector3.new(a.x, a.y, a.z))
+				local rb = rend(Vector3.new(b.x, b.y, b.z))
+				local len = (rb - ra).Magnitude
+				local mid = (ra + rb) * 0.5
+				if len < 1e-3 or (mid - focus).Magnitude > cutoff then
+					seg.Transparency = 1
+				else
+					seg.Transparency = 0.25
+					seg.Color = self._predColor
+					seg.Size = Vector3.new(segThick, segThick, len)
+					seg.CFrame = CFrame.lookAt(mid, rb)
+				end
+			end
+		end
+		self._nodeMarker.Transparency = 0
+		self._nodeMarker.Size = Vector3.new(mk * 1.1, mk * 1.1, mk * 1.1)
+		self._nodeMarker.CFrame = CFrame.new(rend(pred.nodePos))
+		nodeBB.Enabled = true
+	else
+		for _, seg in ipairs(self._predSegs) do
+			seg.Transparency = 1
+		end
+		self._nodeMarker.Transparency = 1
+		nodeBB.Enabled = false
+	end
+end
+
+function MapViewController:GetMapScale()
+	return self._mapScale
 end
 
 return MapViewController
