@@ -156,10 +156,19 @@ function FlightController:_onMode(mode)
 	-- Sun keep orbiting smoothly between pages -- don't snap the clock or reset the craft.
 	-- We DO reset when entering the game (-> VAB/Flight) or returning to the menu from in-game.
 	local isMenu = self._mode:IsMenu()
-	if isMenu and self._prevWasMenu then
+	local wasMenu = self._prevWasMenu
+	local prev = self._prevMode
+	self._prevWasMenu = isMenu
+	self._prevMode = mode
+
+	if isMenu and wasMenu then
 		return
 	end
-	self._prevWasMenu = isMenu
+	-- EVA leaves the craft parked exactly where it landed; resuming Flight from EVA must NOT
+	-- reset it either. (Other mode changes do a full reset back to the pad.)
+	if mode == "EVA" or (mode == "Flight" and prev == "EVA") then
+		return
+	end
 
 	self._vehicle:ResetRuntime()
 	-- Back on the pad: reset to Terra (the active body), at the equatorial launch site.

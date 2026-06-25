@@ -34,6 +34,15 @@ local function slotKey(userId, slot)
 	return ("save_v1_%d_%d"):format(userId, slot)
 end
 
+local CREW_NAMES = { "Ari", "Cosmo", "Nova", "Orin", "Vega", "Lyra", "Milo", "Juno", "Rhea", "Atlas" }
+local function seedCrew()
+	local crew = {}
+	for i = 1, 3 do
+		crew[i] = { name = CREW_NAMES[i], status = "Available" }
+	end
+	return crew
+end
+
 local function defaultProfile(name)
 	return {
 		name = name or "New Save",
@@ -42,6 +51,8 @@ local function defaultProfile(name)
 		unlocked = { basics = true },
 		milestones = {},
 		experiments = {}, -- collected biome/situation science keys (Science.key -> true)
+		crew = seedCrew(), -- named astronaut roster
+		flags = {}, -- planted surface flags { name, bodyId, pos }
 		craft = nil, -- reserved: serialized build-mode design
 		vessels = {}, -- reserved: in-orbit craft (for docking)
 	}
@@ -54,6 +65,8 @@ local function normalize(p)
 	p.milestones = (type(p.milestones) == "table") and p.milestones or {}
 	p.experiments = (type(p.experiments) == "table") and p.experiments or {}
 	p.vessels = (type(p.vessels) == "table") and p.vessels or {}
+	p.crew = (type(p.crew) == "table" and #p.crew > 0) and p.crew or seedCrew()
+	p.flags = (type(p.flags) == "table") and p.flags or {}
 	return p
 end
 
@@ -266,6 +279,26 @@ local function onDeleteVessel(player, index)
 	end
 end
 
+-- Plant a flag on a surface (a persistent monument that re-renders when you return).
+local MAX_FLAGS = 24
+local function onPlantFlag(player, flag)
+	local p = profiles[player.UserId]
+	if not p or type(flag) ~= "table" or type(flag.pos) ~= "table" then
+		return
+	end
+	p.flags = p.flags or {}
+	p.flags[#p.flags + 1] = {
+		name = (type(flag.name) == "string" and flag.name ~= "" and flag.name) or "Flag",
+		bodyId = (type(flag.bodyId) == "string") and flag.bodyId or "planet",
+		pos = { x = num(flag.pos.x), y = num(flag.pos.y), z = num(flag.pos.z) },
+	}
+	while #p.flags > MAX_FLAGS do
+		table.remove(p.flags, 1)
+	end
+	saveActive(player)
+	pushState(player)
+end
+
 -- Recover a persisted vessel: remove it and refund a modest science amount (it was a real
 -- investment to fly up there), freeing the slot.
 local RECOVER_SCIENCE = 8
@@ -318,6 +351,7 @@ function SaveServer.start()
 	local experimentEv = re("RunExperiment")
 	local saveVesselEv, delVesselEv = re("SaveVessel"), re("DeleteVessel")
 	local recoverVesselEv = re("RecoverVessel")
+	local plantFlagEv = re("PlantFlag")
 	folder.Parent = ReplicatedStorage
 	remotes = { state = stateEv }
 
@@ -332,6 +366,7 @@ function SaveServer.start()
 	saveVesselEv.OnServerEvent:Connect(onSaveVessel)
 	delVesselEv.OnServerEvent:Connect(onDeleteVessel)
 	recoverVesselEv.OnServerEvent:Connect(onRecoverVessel)
+	plantFlagEv.OnServerEvent:Connect(onPlantFlag)
 	stateEv.OnServerEvent:Connect(function(player)
 		pushState(player) -- client re-request (covers a late client)
 	end)

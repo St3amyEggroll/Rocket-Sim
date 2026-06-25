@@ -15,6 +15,7 @@ local Science = {}
 Science.experiments = {
 	thermometer = { id = "thermometer", name = "Temperature Scan", base = 3 },
 	barometer = { id = "barometer", name = "Pressure Scan", base = 4, needsAtmosphere = true },
+	evaSample = { id = "evaSample", name = "Surface Sample", base = 8 }, -- collected on EVA
 }
 
 -- Reward = base * situation multiplier * body multiplier (biome only splits the collection key,

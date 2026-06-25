@@ -53,6 +53,7 @@ function MenuController:Start()
 	local Flight = Registry:Get("FlightController")
 	self._flight = Flight
 	self._vehicle = Registry:Get("VehicleController")
+	self._eva = Registry:Get("EVAController")
 	local player = Players.LocalPlayer
 
 	local remotes = ReplicatedStorage:WaitForChild("GameRemotes", 10)
@@ -94,6 +95,13 @@ function MenuController:_setMenuOpen(open)
 	self._menuBtn.Text = open and "CLOSE" or "MENU"
 	if open then
 		self:_refreshLeaveBtn()
+		if self._evaBtn then
+			local can = self._eva and self._eva:CanEVA()
+			self._evaBtn.Active = can
+			self._evaBtn.AutoButtonColor = can
+			self._evaBtn.BackgroundColor3 = can and Color3.fromRGB(60, 140, 90) or Color3.fromRGB(54, 60, 70)
+			self._evaBtn.Text = can and "EVA" or "EVA (land first)"
+		end
 	end
 end
 
@@ -226,6 +234,16 @@ function MenuController:_build(parentGui)
 		self:_leaveInOrbit()
 	end)
 	self._leaveBtn = leave
+
+	local eva = button(panel, "EVA", Color3.fromRGB(60, 140, 90), UDim2.new(1, 0, 0, 44))
+	eva.TextSize = 15
+	eva.Activated:Connect(function()
+		if self._eva and self._eva:CanEVA() then
+			self:_setMenuOpen(false)
+			self._mode:SetMode("EVA")
+		end
+	end)
+	self._evaBtn = eva
 	local resume = button(panel, "Resume", Color3.fromRGB(50, 56, 70), UDim2.new(1, 0, 0, 38))
 	resume.TextSize = 14
 	resume.Activated:Connect(function()

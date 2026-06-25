@@ -39,6 +39,7 @@ function CameraController:Start()
 	self._origin = Registry:Get("FloatingOriginController")
 	self._vehicle = Registry:Get("VehicleController")
 	self._flight = Registry:Get("FlightController")
+	self._eva = Registry:Get("EVAController")
 	local Flight = self._flight
 	self._bodyRadius = Flight:GetBodyRadius()
 
@@ -92,6 +93,24 @@ function CameraController:_update(state, info)
 		local dir = Vector3.new(math.cos(az) * ce, math.sin(M.camElevation), math.sin(az) * ce)
 		cam.CFrame = CFrame.lookAt(center + dir * M.camDist, center, Vector3.yAxis)
 		return
+	end
+
+	-- EVA: chase the kerbal on foot, levelled to its local-up; RMB orbits, wheel zooms.
+	if info and info.mode == "EVA" then
+		local target = self._eva and self._eva:GetEvaRender()
+		if target then
+			local up = self._eva:GetEvaUp()
+			local orbit = self._input:GetCameraOrbit()
+			local ref = (math.abs(up.Y) < 0.99) and Vector3.yAxis or Vector3.xAxis
+			local fwd0 = up:Cross(ref)
+			fwd0 = (fwd0.Magnitude > 1e-3) and fwd0.Unit or up:Cross(Vector3.xAxis).Unit
+			local behind = CFrame.fromAxisAngle(up, orbit.azimuth) * (-fwd0)
+			local offset = behind * math.cos(orbit.elevation) + up * math.sin(orbit.elevation)
+			local dist = math.clamp(orbit.distance, 14, 120)
+			local focus = target + up * 2
+			cam.CFrame = CFrame.lookAt(focus + offset * dist, focus, up)
+			return
+		end
 	end
 
 	local orbit = self._input:GetCameraOrbit()
