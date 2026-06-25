@@ -1,6 +1,7 @@
 --[[
 	VABController
-	Owner of: the Vehicle Assembly Building UI + the 3D, KSP-style build interaction.
+	Owner of: the Build-mode UI + the 3D, KSP-style build interaction. ("Build mode" is the
+	player-facing name; the internal GameMode state key is still "VAB".)
 
 	Building is real 3D, drag-and-drop:
 	  * Press-and-hold a part in the LEFT palette -> it becomes a 3D ghost on your cursor.
@@ -162,7 +163,7 @@ function VABController:_build(parentGui)
 	title.Font = Enum.Font.GothamBold
 	title.TextSize = 22
 	title.TextColor3 = ACCENT
-	title.Text = "VEHICLE ASSEMBLY BUILDING"
+	title.Text = "BUILD MODE"
 	title.Parent = gui
 
 	self:_buildPalette(gui)

@@ -3,7 +3,7 @@
 	Owner of: the in-flight menu and the crash overlay.
 
 	Shown only in Flight mode. A top-right MENU button opens a small panel with
-	"Back to Launch Site" (KSP revert-to-launch), "Revert to VAB" (back to building)
+	"Back to Launch Site" (KSP revert-to-launch), "Revert to Build" (back to building)
 	and "Resume". When the craft is Crashed a centered overlay offers the same two
 	recovery actions, so you are never stuck on a wreck.
 
@@ -145,7 +145,7 @@ function MenuController:_build(parentGui)
 	toLaunch.Activated:Connect(function()
 		self:_returnToLaunch()
 	end)
-	local toVAB = button(panel, "Revert to VAB", AMBER, UDim2.new(1, 0, 0, 44))
+	local toVAB = button(panel, "Revert to Build", AMBER, UDim2.new(1, 0, 0, 44))
 	toVAB.Activated:Connect(function()
 		self:_revertToVAB()
 	end)
@@ -211,7 +211,7 @@ function MenuController:_build(parentGui)
 		self:_returnToLaunch()
 	end)
 
-	local b2 = button(card, "Revert to VAB", AMBER, UDim2.fromOffset(348, 44))
+	local b2 = button(card, "Revert to Build", AMBER, UDim2.fromOffset(348, 44))
 	b2.AnchorPoint = Vector2.new(0.5, 0)
 	b2.Position = UDim2.new(0.5, 0, 0, 164)
 	b2.ZIndex = 7

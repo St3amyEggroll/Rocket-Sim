@@ -1,13 +1,13 @@
 --[[
 	LaunchSiteController
-	Owner of: the launch site's ground structures -- a raised launch PAD (concrete platform +
-	hold-down mount + service/gantry tower), the VAB BUILDING, and a crawlerway between them.
+	Owner of: the launch PAD -- a raised concrete platform with a dark launch mount + hold-down
+	clamps that the rocket stands on.
 
-	The structures live at the fixed equatorial launch site, oriented radial-out, with the pad
-	deck Config.LAUNCH.padHeight studs above the terrain (the craft's base sits on it). They are
-	shown only while the craft is near Terra's surface (like the streamed terrain) -- hidden in
-	space, in map view, and behind the menu cinematic. The whole site is one Model, re-pivoted
-	each frame through the floating origin so it stays put as the world rebases.
+	It lives at the fixed equatorial launch site, oriented radial-out, with the pad deck
+	Config.LAUNCH.padHeight studs above the terrain (the craft's base sits on it). It is shown
+	only while the craft is near Terra's surface (like the streamed terrain) -- hidden in space,
+	in map view, and behind the menu cinematic. The pad is one Model, re-pivoted each frame
+	through the floating origin so it stays put as the world rebases.
 ]]
 
 local Workspace = game:GetService("Workspace")
@@ -25,9 +25,6 @@ local CONCRETE = Color3.fromRGB(98, 100, 106)
 local DARKCON = Color3.fromRGB(62, 64, 72)
 local STEEL = Color3.fromRGB(124, 128, 136)
 local METALDARK = Color3.fromRGB(48, 50, 58)
-local BUILDING = Color3.fromRGB(120, 124, 132)
-local TRIM = Color3.fromRGB(58, 92, 150)
-local DOOR = Color3.fromRGB(40, 52, 80)
 
 -- A CFrame at `pos` whose UP axis is `up` (matches the craft / pad orientation).
 local function frameFromUp(pos, up)
@@ -108,34 +105,6 @@ function LaunchSiteController:_build()
 		local a = i * math.pi / 2
 		box(model, Vector3.new(2.5, 9, 2.5), STEEL, Enum.Material.Metal, at(math.cos(a) * 11, padH + 4, math.sin(a) * 11))
 	end
-
-	-- ---- Service / gantry tower beside the pad ----
-	local towerX, towerH, legR = 32, 80, 6
-	for _, lx in ipairs({ towerX - legR, towerX + legR }) do
-		for _, lz in ipairs({ -legR, legR }) do
-			box(model, Vector3.new(2, towerH, 2), STEEL, Enum.Material.Metal, at(lx, padH + towerH / 2, lz))
-		end
-	end
-	for _, ly in ipairs({ padH + 18, padH + 44, padH + 70 }) do
-		box(model, Vector3.new(legR * 2 + 2, 1.5, 2), STEEL, Enum.Material.Metal, at(towerX, ly, -legR))
-		box(model, Vector3.new(legR * 2 + 2, 1.5, 2), STEEL, Enum.Material.Metal, at(towerX, ly, legR))
-		box(model, Vector3.new(2, 1.5, legR * 2 + 2), STEEL, Enum.Material.Metal, at(towerX - legR, ly, 0))
-		box(model, Vector3.new(2, 1.5, legR * 2 + 2), STEEL, Enum.Material.Metal, at(towerX + legR, ly, 0))
-	end
-	-- crew access arm reaching from the tower toward the rocket.
-	box(model, Vector3.new(towerX - legR - 4, 2.5, 5), STEEL, Enum.Material.Metal, at((towerX - legR - 4) / 2 + 4, padH + 56, 0))
-
-	-- ---- VAB building + low bay, set back from the pad ----
-	local vx = -160
-	box(model, Vector3.new(110, 138, 100), BUILDING, Enum.Material.Concrete, at(vx, 138 / 2, 0)) -- tall high bay
-	box(model, Vector3.new(114, 6, 104), TRIM, Enum.Material.SmoothPlastic, at(vx, 138 + 1, 0)) -- roof trim
-	-- twin bay doors on the face toward the pad (+X face at x = vx + 55).
-	box(model, Vector3.new(1.5, 96, 34), DOOR, Enum.Material.SmoothPlastic, at(vx + 55, 96 / 2, -22))
-	box(model, Vector3.new(1.5, 96, 34), DOOR, Enum.Material.SmoothPlastic, at(vx + 55, 96 / 2, 22))
-	box(model, Vector3.new(72, 58, 84), STEEL, Enum.Material.Concrete, at(vx - 88, 58 / 2, 0)) -- low bay annex
-
-	-- crawlerway connecting the VAB to the pad.
-	box(model, Vector3.new(120, 1, 28), DARKCON, Enum.Material.Concrete, at(-67, 0.5, 0))
 
 	self._model = model
 end
