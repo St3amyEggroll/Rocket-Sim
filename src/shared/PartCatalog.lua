@@ -311,6 +311,18 @@ PartCatalog.parts = {
 		radial = true,
 		experiment = "barometer", -- a Pressure Scan (atmosphere only)
 	},
+	DockingPort = {
+		id = "DockingPort",
+		name = "Docking Port",
+		category = "structure",
+		mass = 0.15,
+		height = 1.2, -- a thin ring that stacks on top of the craft (the nose)
+		radius = 2.2,
+		color = Color3.fromRGB(196, 200, 208),
+		shape = "dock",
+		drag = 0.06,
+		dock = true, -- lets the craft be left in orbit + latch onto another port
+	},
 }
 
 -- Display order in the VAB palette.
@@ -338,6 +350,7 @@ PartCatalog.order = {
 	"LandingLeg",
 	"Thermometer",
 	"Barometer",
+	"DockingPort",
 }
 
 function PartCatalog.get(id)

@@ -229,6 +229,15 @@ Config.RENDER = {
 	maxDist = 23000,
 }
 
+-- Docking: leave a craft (with a docking port) in a stable orbit; it persists as a "vessel"
+-- you can rendezvous with on later flights. Two ports that meet slowly enough latch together.
+Config.DOCKING = {
+	maxVessels = 4, -- per save slot (oldest dropped past this)
+	dockDist = 14, -- ports within this many studs...
+	dockSpeed = 4, -- ...and below this relative speed (studs/s) -> dock
+	renderRange = 6000, -- only render a vessel proxy within this distance of the craft
+}
+
 Config.FLOATING_ORIGIN = {
 	rebaseThreshold = 1e9, -- legacy single-threshold rebase (unused by the body policy)
 	-- Within this distance of the body centre the origin is pinned to 0 (so the fixed

@@ -24,6 +24,7 @@ local Science = require(Shared:WaitForChild("Science"))
 local SaveServer = {}
 
 local MAX_SLOTS = 3
+local MAX_VESSELS = 4
 local store
 local remotes
 local active = {} -- [userId] = slot number currently loaded (nil = none)
@@ -223,6 +224,48 @@ local function onRunExperiment(player, report)
 	pushState(player)
 end
 
+local function num(v)
+	return (type(v) == "number" and v == v) and v or 0 -- coerce; reject NaN
+end
+
+-- Leave a craft in orbit: store it as a persistent vessel (orbital state relative to its body +
+-- a lightweight design) that the player can rendezvous/dock with on later flights.
+local function onSaveVessel(player, vessel)
+	local p = profiles[player.UserId]
+	if not p or type(vessel) ~= "table" then
+		return
+	end
+	if type(vessel.pos) ~= "table" or type(vessel.vel) ~= "table" or type(vessel.design) ~= "table" then
+		return
+	end
+	p.vessels = p.vessels or {}
+	local clean = {
+		name = (type(vessel.name) == "string" and vessel.name ~= "" and vessel.name) or ("Vessel " .. (#p.vessels + 1)),
+		bodyId = (type(vessel.bodyId) == "string") and vessel.bodyId or "planet",
+		pos = { x = num(vessel.pos.x), y = num(vessel.pos.y), z = num(vessel.pos.z) },
+		vel = { x = num(vessel.vel.x), y = num(vessel.vel.y), z = num(vessel.vel.z) },
+		design = vessel.design,
+	}
+	table.insert(p.vessels, clean)
+	while #p.vessels > MAX_VESSELS do
+		table.remove(p.vessels, 1)
+	end
+	saveActive(player)
+	pushState(player)
+end
+
+local function onDeleteVessel(player, index)
+	local p = profiles[player.UserId]
+	if not p or type(index) ~= "number" or not p.vessels then
+		return
+	end
+	if p.vessels[index] then
+		table.remove(p.vessels, index)
+		saveActive(player)
+		pushState(player)
+	end
+end
+
 -- Save the current craft design into the active slot (reserved for the craft serializer).
 local function onSaveCraft(player, craft)
 	local p = profiles[player.UserId]
@@ -259,6 +302,7 @@ function SaveServer.start()
 	local listFn, loadFn, newFn, delFn = rf("ListSaves"), rf("LoadSave"), rf("NewGame"), rf("DeleteSave")
 	local stateEv, reportEv, unlockEv, craftEv = re("State"), re("ReportMilestone"), re("UnlockTier"), re("SaveCraft")
 	local experimentEv = re("RunExperiment")
+	local saveVesselEv, delVesselEv = re("SaveVessel"), re("DeleteVessel")
 	folder.Parent = ReplicatedStorage
 	remotes = { state = stateEv }
 
@@ -270,6 +314,8 @@ function SaveServer.start()
 	unlockEv.OnServerEvent:Connect(onUnlockTier)
 	craftEv.OnServerEvent:Connect(onSaveCraft)
 	experimentEv.OnServerEvent:Connect(onRunExperiment)
+	saveVesselEv.OnServerEvent:Connect(onSaveVessel)
+	delVesselEv.OnServerEvent:Connect(onDeleteVessel)
 	stateEv.OnServerEvent:Connect(function(player)
 		pushState(player) -- client re-request (covers a late client)
 	end)

@@ -1067,6 +1067,46 @@ function VehicleController:HasControl(): boolean
 	return false
 end
 
+-- Height (above the craft base, along the nose) of the craft's highest docking port, or nil
+-- if it has none. The port world position is state.position + nose * this.
+function VehicleController:GetDockPortHeight()
+	local best
+	for i, p in ipairs(self._parts) do
+		if self:_isActive(i) and p.def.dock then
+			if not best or p.cf.Y > best then
+				best = p.cf.Y
+			end
+		end
+	end
+	if not best then
+		return nil
+	end
+	return best - (self:GetRotProfile().base or 0)
+end
+
+function VehicleController:HasDockingPort(): boolean
+	return self:GetDockPortHeight() ~= nil
+end
+
+-- Top off every fuel section (used when docking with a station).
+function VehicleController:Refuel()
+	for root, cap in pairs(self._sectionCapacity or {}) do
+		self._sectionFuel[root] = cap
+	end
+	self._runtimeVer += 1
+	self.Changed:Fire()
+end
+
+-- A lightweight serialization of the ACTIVE craft (id + build position + radial flag per part),
+-- enough to rebuild a visual proxy of a vessel left in orbit.
+function VehicleController:SerializeActive()
+	local out = {}
+	for _, e in ipairs(self:GetActiveLayout()) do
+		out[#out + 1] = { id = e.def.id, x = e.cf.X, y = e.cf.Y, z = e.cf.Z, radial = e.def.radial == true }
+	end
+	return out
+end
+
 -- True if the active craft carries landing legs (a more forgiving touchdown).
 function VehicleController:HasLandingLegs(): boolean
 	for i, p in ipairs(self._parts) do

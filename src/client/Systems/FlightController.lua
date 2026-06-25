@@ -421,6 +421,7 @@ end
 function FlightController:_fire(extra)
 	extra.mode = self._mode:GetMode()
 	extra.isMenu = self._mode:IsMenu()
+	extra.missionTime = self._missionTime
 	extra.nose = self._attitude.LookVector
 	extra.attitude = self._attitude
 	extra.mapMode = self._input:GetMapMode()

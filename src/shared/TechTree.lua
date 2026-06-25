@@ -32,6 +32,8 @@ TechTree.nodes = {
 	-- Second ring.
 	{ id = "landing", name = "Landing", col = 2, row = 0, cost = 10, requires = { "aerodynamics" },
 		parts = { "LandingLeg" } },
+	{ id = "docking", name = "Docking Tech", col = 2, row = 1, cost = 16, requires = { "generalRocketry" },
+		parts = { "DockingPort" } },
 	{ id = "fuelSystems", name = "Fuel Systems", col = 2, row = 2, cost = 8, requires = { "generalRocketry" },
 		parts = { "TankXL" } },
 	{ id = "heavyRocketry", name = "Heavy Rocketry", col = 2, row = 3, cost = 12, requires = { "generalRocketry" },
@@ -60,6 +62,7 @@ TechTree.milestones = {
 	{ id = "munSOI", science = 20, label = "Reach the Mun" },
 	{ id = "munLand", science = 30, label = "Land on the Mun" },
 	{ id = "solar", science = 50, label = "Reach solar orbit" },
+	{ id = "dock", science = 25, label = "Dock two craft" },
 }
 
 function TechTree.milestoneScience(id)

@@ -137,6 +137,13 @@ function PartPreview.geometry(model, def)
 			CFrame = CFrame.new(r * 1.1, 0, 0),
 		})
 		dish.Reflectance = 0.1
+	elseif sh == "dock" then
+		-- A docking port: a short collar with a darker docking ring + a target cross on top.
+		cyl(model, h * 0.5, r * 0.78, def.color, METAL, -h * 0.2)
+		cyl(model, h * 0.42, r, Color3.fromRGB(70, 74, 82), METAL, h * 0.18) -- ring
+		cyl(model, h * 0.18, r * 0.62, Color3.fromRGB(28, 30, 36), SMOOTH, h * 0.34) -- recessed hub
+		block(model, Vector3.new(r * 1.5, 0.18, 0.3), Color3.fromRGB(232, 196, 60), SMOOTH, CFrame.new(0, h * 0.45, 0)) -- target cross
+		block(model, Vector3.new(0.3, 0.18, r * 1.5), Color3.fromRGB(232, 196, 60), SMOOTH, CFrame.new(0, h * 0.45, 0))
 	else
 		-- fuel tank: body + thin end rings for detail
 		cyl(model, h, r, def.color, SMOOTH, 0)
