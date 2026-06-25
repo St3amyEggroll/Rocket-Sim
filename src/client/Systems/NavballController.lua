@@ -22,6 +22,7 @@ local RADIUS = 92
 local PRO = Color3.fromRGB(246, 240, 120) -- prograde / retrograde (yellow)
 local RAD = Color3.fromRGB(120, 210, 255) -- radial (cyan)
 local NRM = Color3.fromRGB(200, 130, 255) -- normal (purple)
+local TGT = Color3.fromRGB(245, 130, 210) -- target markers (pink)
 local SKY = Color3.fromRGB(74, 150, 224)
 local GROUND = Color3.fromRGB(170, 132, 80)
 local GRID = Color3.fromRGB(238, 243, 250)
@@ -133,6 +134,7 @@ function NavballController:Init() end
 
 function NavballController:Start()
 	self._input = Registry:Get("InputController")
+	self._vessels = Registry:Get("VesselController")
 	local Flight = Registry:Get("FlightController")
 	local Mode = Registry:Get("GameModeController")
 	self:_build(Players.LocalPlayer:WaitForChild("PlayerGui"))
@@ -230,6 +232,11 @@ function NavballController:_build(parent)
 	self._mRadIn = makeMarker(ball, "radialIn", RAD)
 	self._mNorm = makeMarker(ball, "normal", NRM)
 	self._mAnti = makeMarker(ball, "antinormal", NRM)
+	-- Target markers (pink): direction to target, anti-target, and target-relative pro/retro.
+	self._mTgtTo = makeMarker(ball, "radialOut", TGT)
+	self._mTgtAnti = makeMarker(ball, "radialIn", TGT)
+	self._mTgtPro = makeMarker(ball, "prograde", TGT)
+	self._mTgtRetro = makeMarker(ball, "retrograde", TGT)
 
 	-- Throttle bar (left of the ball).
 	local tb = Instance.new("Frame")
@@ -513,6 +520,16 @@ function NavballController:_update(state, info)
 	place(self._mRadIn, -radOut, right, up, look, true)
 	place(self._mNorm, norm, right, up, look, hasVel)
 	place(self._mAnti, -norm, right, up, look, hasVel)
+
+	-- Target markers: direction to the target + target-relative prograde/retrograde.
+	local td = self._vessels and self._vessels:GetTargetData()
+	local hasTgt = td ~= nil and td.sameBody == true and td.dirToTarget ~= nil
+	place(self._mTgtTo, hasTgt and td.dirToTarget or Vector3.zAxis, right, up, look, hasTgt)
+	place(self._mTgtAnti, hasTgt and -td.dirToTarget or Vector3.zAxis, right, up, look, hasTgt)
+	local tvel = hasTgt and td.relVel
+	local tvHas = hasTgt and tvel and tvel.Magnitude > 0.3
+	place(self._mTgtPro, tvHas and tvel.Unit or Vector3.zAxis, right, up, look, tvHas)
+	place(self._mTgtRetro, tvHas and -tvel.Unit or Vector3.zAxis, right, up, look, tvHas)
 
 	self._throttleFill.Size = UDim2.new(1, 0, (info.throttle or 0), 0)
 

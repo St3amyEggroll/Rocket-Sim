@@ -56,6 +56,16 @@ local function fmt(n)
 	return string.format("%.0fm", n)
 end
 
+local function fmtTime(s)
+	s = math.max(0, math.floor(s + 0.5))
+	if s >= 3600 then
+		return string.format("%dh%02dm", s // 3600, (s % 3600) // 60)
+	elseif s >= 60 then
+		return string.format("%dm%02ds", s // 60, s % 60)
+	end
+	return s .. "s"
+end
+
 -- Rebuild a vessel's visual proxy from its lightweight design (base sits at the model origin,
 -- +Y up). No FX -- just the part geometry, shared with the build palette.
 local function buildVesselModel(design)
@@ -236,10 +246,80 @@ function VesselController:_render(state, info)
 		end
 	end
 
+	self:_computeTargetData(state, info)
 	self:_updateReadout(state, info)
 	if flying then
 		self:_checkDock(state, info)
 	end
+end
+
+-- Closest approach over the next window: the craft coasts on its conic while the target stays
+-- on rails. Returns (separation, time-to-approach). Cheap enough to run a few times a second.
+function VesselController:_closestApproach(state, v, mu, mt)
+	local craft0 = { position = state.position, velocity = state.velocity }
+	local ro = Orbit.getReadout(state, mu)
+	local window = (ro and ro.period and ro.period < math.huge) and ro.period * 1.2 or 1200
+	window = math.min(window, 6000)
+	local steps, best, bestT = 48, math.huge, 0
+	for k = 0, steps do
+		local t = (k / steps) * window
+		local cs = Orbit.propagate(craft0, mu, t)
+		local ts = Orbit.propagate(v.state0, v.mu, mt + t)
+		local dx = ts.position.x - cs.position.x
+		local dy = ts.position.y - cs.position.y
+		local dz = ts.position.z - cs.position.z
+		local d = math.sqrt(dx * dx + dy * dy + dz * dz)
+		if d < best then
+			best, bestT = d, t
+		end
+	end
+	return best, bestT
+end
+
+-- Build the readout/marker data for the selected target (relative to the craft, body-frame).
+function VesselController:_computeTargetData(state, info)
+	local v = self._vessels[self._targetIndex]
+	if not v or not v.relPos then
+		self._targetData = nil
+		return
+	end
+	if v.bodyId ~= info.bodyId then
+		self._targetData = { name = v.name, sameBody = false }
+		return
+	end
+	local cp = Vector3.new(state.position.x, state.position.y, state.position.z)
+	local cv = Vector3.new(state.velocity.x, state.velocity.y, state.velocity.z)
+	local tp = Vector3.new(v.relPos.x, v.relPos.y, v.relPos.z)
+	local tv = Vector3.new(v.relVel.x, v.relVel.y, v.relVel.z)
+	local dp = tp - cp
+	local dist = dp.Magnitude
+	local relVel = cv - tv -- the craft's velocity in the target's frame
+	local toTarget = (dist > 1e-3) and dp.Unit or Vector3.zAxis
+	local closing = relVel:Dot(-toTarget) -- + = approaching, - = receding
+
+	-- Closest approach, throttled (the per-frame dist/rel-speed above stay live).
+	local now = os.clock()
+	if not self._caAt or now - self._caAt > 0.3 then
+		self._caAt = now
+		self._caDist, self._caTime = self:_closestApproach(state, v, info.mu, info.missionTime or 0)
+	end
+
+	self._targetData = {
+		name = v.name,
+		sameBody = true,
+		dist = dist,
+		relSpeed = relVel.Magnitude,
+		closing = closing,
+		dirToTarget = toTarget,
+		relVel = relVel,
+		caDist = self._caDist,
+		caTime = self._caTime,
+	}
+end
+
+-- The navball reads this to draw target markers.
+function VesselController:GetTargetData()
+	return self._targetData
 end
 
 function VesselController:_checkDock(state, info)
@@ -289,7 +369,7 @@ function VesselController:_buildHUD(pg)
 	local panel = Instance.new("TextButton")
 	panel.AnchorPoint = Vector2.new(0.5, 0)
 	panel.Position = UDim2.new(0.5, 0, 0, 12)
-	panel.Size = UDim2.fromOffset(240, 70)
+	panel.Size = UDim2.fromOffset(248, 90)
 	panel.BackgroundColor3 = BG
 	panel.BackgroundTransparency = 0.15
 	panel.BorderSizePixel = 0
@@ -323,8 +403,19 @@ function VesselController:_buildHUD(pg)
 	self._tInfo.Text = ""
 	self._tInfo.Parent = panel
 
+	self._tCA = Instance.new("TextLabel")
+	self._tCA.Position = UDim2.fromOffset(12, 48)
+	self._tCA.Size = UDim2.new(1, -24, 0, 16)
+	self._tCA.BackgroundTransparency = 1
+	self._tCA.Font = Enum.Font.Code
+	self._tCA.TextSize = 12
+	self._tCA.TextXAlignment = Enum.TextXAlignment.Left
+	self._tCA.TextColor3 = CYAN
+	self._tCA.Text = ""
+	self._tCA.Parent = panel
+
 	self._tHint = Instance.new("TextLabel")
-	self._tHint.Position = UDim2.fromOffset(12, 50)
+	self._tHint.Position = UDim2.fromOffset(12, 70)
 	self._tHint.Size = UDim2.new(1, -24, 0, 14)
 	self._tHint.BackgroundTransparency = 1
 	self._tHint.Font = Enum.Font.Gotham
@@ -355,22 +446,28 @@ function VesselController:_updateReadout(state, info)
 	if not self._gui or not self._gui.Enabled then
 		return
 	end
-	local v = self._vessels[self._targetIndex]
-	if not v then
+	local d = self._targetData
+	if not d then
 		self._tName.Text = "NO TARGET"
 		self._tInfo.Text = ""
+		self._tCA.Text = ""
 		return
 	end
-	self._tName.Text = "» " .. v.name
-	if v.bodyId ~= info.bodyId then
+	self._tName.Text = "» " .. d.name
+	if not d.sameBody then
 		self._tInfo.Text = "different orbit"
 		self._tInfo.TextColor3 = DIM
+		self._tCA.Text = ""
 		return
 	end
-	local dp = Vector3.new(v.relPos.x - state.position.x, v.relPos.y - state.position.y, v.relPos.z - state.position.z)
-	local rel = Vector3.new(state.velocity.x - v.relVel.x, state.velocity.y - v.relVel.y, state.velocity.z - v.relVel.z)
-	self._tInfo.Text = ("%s   %.1f m/s"):format(fmt(dp.Magnitude), rel.Magnitude)
-	self._tInfo.TextColor3 = (dp.Magnitude <= Config.DOCKING.dockDist) and Color3.fromRGB(150, 235, 170) or TEXT
+	local arrow = (d.closing > 0.2) and " ↓" or (d.closing < -0.2) and " ↑" or ""
+	self._tInfo.Text = ("%s   %.1f m/s%s"):format(fmt(d.dist), d.relSpeed, arrow)
+	self._tInfo.TextColor3 = (d.dist <= Config.DOCKING.dockDist) and Color3.fromRGB(150, 235, 170) or TEXT
+	if d.caDist then
+		self._tCA.Text = ("CA  %s  in %s"):format(fmt(d.caDist), fmtTime(d.caTime))
+	else
+		self._tCA.Text = ""
+	end
 end
 
 function VesselController:_flash(text)
