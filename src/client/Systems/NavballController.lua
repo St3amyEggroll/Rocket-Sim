@@ -1,13 +1,13 @@
 --[[
 	NavballController
-	The flight attitude indicator (bottom-centre), KSP-styled.
+	The flight attitude indicator (bottom-centre): a 3D navball software-projected into a 2D disc.
 
-	The ball is a CIRCULAR frame whose background is a UIGradient sky/ground horizon:
-	rotating the gradient gives roll, moving its colour transition gives pitch. (A
-	rounded frame clips its own gradient to a circle, unlike ClipsDescendants which only
-	clips to a rectangle -- that's why the old version looked square.) On top sit the
-	prograde/retrograde/radial/normal markers, a heading readout and the nose reticle.
-	A SAS panel of clickable mode icons sits to the right. Visible only in Flight view.
+	Each frame the craft's attitude defines a world basis (radial-out = the ball's zenith, with a
+	pole-ward "north" and "east"); we project a unit sphere's latitude/longitude grid through the
+	craft's right/up/look axes onto the disc, drawing the visible (front) hemisphere as curved
+	gridlines plus a red horizon great-circle and pitch numbers -- so it reads as a real rotating
+	ball. A sky/ground gradient fills behind it; prograde/retrograde/radial/normal markers, a nose
+	reticle, a heading readout, a throttle bar and a SAS panel sit on top. Flight view only.
 ]]
 
 local Players = game:GetService("Players")
@@ -22,9 +22,17 @@ local RADIUS = 92
 local PRO = Color3.fromRGB(246, 240, 120) -- prograde / retrograde (yellow)
 local RAD = Color3.fromRGB(120, 210, 255) -- radial (cyan)
 local NRM = Color3.fromRGB(200, 130, 255) -- normal (purple)
-local SKY = Color3.fromRGB(92, 156, 226)
-local GROUND = Color3.fromRGB(122, 92, 58)
+local SKY = Color3.fromRGB(74, 150, 224)
+local GROUND = Color3.fromRGB(170, 132, 80)
+local GRID = Color3.fromRGB(238, 243, 250)
+local HORIZON = Color3.fromRGB(226, 64, 60)
 local LIT = Color3.fromRGB(120, 255, 150) -- active SAS highlight
+
+-- Grid layout: latitude rings (pitch) and longitude meridians (heading).
+local LON_STEP = 45 -- meridian every this many degrees
+local LON_SEG = 18 -- samples around a latitude ring
+local LAT_SEG = 12 -- samples along a meridian (lat -80..80)
+local FRONT = 0.04 -- a point is on the visible hemisphere when dir.look > this
 
 local function corner(inst, scale)
 	local c = Instance.new("UICorner")
@@ -40,7 +48,7 @@ local function frame(parent, size, pos, color, zindex)
 	f.Position = pos or UDim2.fromScale(0.5, 0.5)
 	f.BackgroundColor3 = color or Color3.fromRGB(255, 255, 255)
 	f.BorderSizePixel = 0
-	f.ZIndex = zindex or 6
+	f.ZIndex = zindex or 8
 	f.Parent = parent
 	return f
 end
@@ -68,35 +76,7 @@ local function diag(parent, rot, color, zindex)
 	b.Rotation = rot
 end
 
--- A thin horizontal line on the ball (the horizon / a pitch-ladder rung). Width is set per frame.
-local function makeLine(parent, thick, color, transparency)
-	local l = Instance.new("Frame")
-	l.AnchorPoint = Vector2.new(0.5, 0.5)
-	l.Size = UDim2.fromOffset(2, thick)
-	l.BackgroundColor3 = color
-	l.BackgroundTransparency = transparency or 0.1
-	l.BorderSizePixel = 0
-	l.ZIndex = 5
-	l.Parent = parent
-	return l
-end
-
--- Place a line at signed distance `distPx` along the ball's vertical (gradient) axis
--- (axisX,axisY), fit to the circle's chord at that height and rolled to match attitude.
-local function setLine(line, axisX, axisY, distPx, maxLen, rollDeg)
-	if math.abs(distPx) >= RADIUS - 1 then
-		line.Visible = false
-		return
-	end
-	line.Visible = true
-	local chord = 2 * math.sqrt(RADIUS * RADIUS - distPx * distPx)
-	local len = maxLen and math.min(chord, maxLen) or chord
-	line.Size = UDim2.fromOffset(len, line.Size.Y.Offset)
-	line.Position = UDim2.new(0.5, axisX * distPx, 0.5, axisY * distPx)
-	line.Rotation = rollDeg
-end
-
--- A circular shading overlay (top highlight / bottom shadow) so the disc reads as a 3D ball.
+-- A circular shading overlay (top highlight / bottom shadow) for 3D depth.
 local function shadeOverlay(parent, color, transparencySeq)
 	local o = Instance.new("Frame")
 	o.AnchorPoint = Vector2.new(0.5, 0.5)
@@ -117,7 +97,7 @@ end
 
 -- Build one prograde/retrograde/radial/normal marker icon.
 local function makeMarker(parent, kind, color, z)
-	z = z or 8
+	z = z or 10
 	local m = frame(parent, UDim2.fromOffset(24, 24), nil, color, z)
 	m.BackgroundTransparency = 1
 	m.Name = kind
@@ -179,7 +159,8 @@ function NavballController:_build(parent)
 	gui.Parent = parent
 	self._gui = gui
 
-	-- The ball: a CIRCULAR frame; its UIGradient background is the sky/ground horizon.
+	-- The ball: a CIRCULAR frame; its UIGradient background is the soft sky/ground fill (the
+	-- crisp horizon + gridlines are drawn over it by the projection).
 	local ball = Instance.new("Frame")
 	ball.AnchorPoint = Vector2.new(0.5, 1)
 	ball.Position = UDim2.new(0.5, 0, 1, -44)
@@ -189,7 +170,7 @@ function NavballController:_build(parent)
 	ball.Parent = gui
 	corner(ball, 1)
 	local stroke = Instance.new("UIStroke")
-	stroke.Color = Color3.fromRGB(190, 200, 214)
+	stroke.Color = Color3.fromRGB(206, 214, 226)
 	stroke.Thickness = 3
 	stroke.Parent = ball
 	local grad = Instance.new("UIGradient")
@@ -198,25 +179,21 @@ function NavballController:_build(parent)
 	self._ball = ball
 	self._grad = grad
 
-	-- Spherical shading: a soft highlight up top and a shadow at the bottom give the flat disc
-	-- some 3D depth (a ball lit from above).
+	-- Spherical shading (top highlight, bottom shadow).
 	shadeOverlay(ball, Color3.fromRGB(255, 255, 255), NumberSequence.new({
-		NumberSequenceKeypoint.new(0, 0.62),
+		NumberSequenceKeypoint.new(0, 0.6),
 		NumberSequenceKeypoint.new(0.5, 1),
 		NumberSequenceKeypoint.new(1, 1),
 	}))
 	shadeOverlay(ball, Color3.fromRGB(0, 0, 0), NumberSequence.new({
 		NumberSequenceKeypoint.new(0, 1),
 		NumberSequenceKeypoint.new(0.55, 1),
-		NumberSequenceKeypoint.new(1, 0.78),
+		NumberSequenceKeypoint.new(1, 0.8),
 	}))
 
-	-- Horizon line + pitch-ladder rungs (drawn over the gradient; positioned each frame).
-	self._horizon = makeLine(ball, 3, Color3.fromRGB(245, 248, 252), 0.05)
-	self._rungs = {}
-	for _, f in ipairs({ -2 / 3, -1 / 3, 1 / 3, 2 / 3 }) do
-		self._rungs[#self._rungs + 1] = { line = makeLine(ball, 2, Color3.fromRGB(208, 215, 226), 0.4), px = f * RADIUS }
-	end
+	-- Pools for the projected gridline segments + pitch numbers.
+	self._segPool, self._segUsed = {}, 0
+	self._numPool, self._numUsed = {}, 0
 
 	-- Centre reticle (the nose / where you point + thrust).
 	local center = Instance.new("TextLabel")
@@ -228,7 +205,7 @@ function NavballController:_build(parent)
 	center.TextSize = 26
 	center.TextColor3 = Color3.fromRGB(255, 220, 70)
 	center.Text = "⊕"
-	center.ZIndex = 14
+	center.ZIndex = 16
 	center.Parent = ball
 
 	-- Heading readout (top of the ball).
@@ -242,7 +219,7 @@ function NavballController:_build(parent)
 	heading.TextSize = 15
 	heading.TextColor3 = Color3.fromRGB(235, 240, 245)
 	heading.Text = "000°"
-	heading.ZIndex = 15
+	heading.ZIndex = 17
 	heading.Parent = ball
 	corner(heading, 0.35)
 	self._heading = heading
@@ -351,6 +328,109 @@ function NavballController:_buildSasPanel(gui)
 	end
 end
 
+-- ---- projected gridline pool ----
+
+function NavballController:_seg(p1, p2, color, thick)
+	self._segUsed += 1
+	local s = self._segPool[self._segUsed]
+	if not s then
+		s = Instance.new("Frame")
+		s.AnchorPoint = Vector2.new(0.5, 0.5)
+		s.BorderSizePixel = 0
+		s.ZIndex = 5
+		s.Parent = self._ball
+		self._segPool[self._segUsed] = s
+	end
+	local dx, dy = p2.X - p1.X, p2.Y - p1.Y
+	local len = math.sqrt(dx * dx + dy * dy)
+	s.Visible = true
+	s.Size = UDim2.fromOffset(math.max(len, 1), thick)
+	s.Position = UDim2.new(0.5, (p1.X + p2.X) * 0.5, 0.5, (p1.Y + p2.Y) * 0.5)
+	s.Rotation = math.deg(math.atan2(dy, dx))
+	s.BackgroundColor3 = color
+	s.BackgroundTransparency = 0.05
+end
+
+function NavballController:_num(pos, text)
+	self._numUsed += 1
+	local l = self._numPool[self._numUsed]
+	if not l then
+		l = Instance.new("TextLabel")
+		l.AnchorPoint = Vector2.new(0.5, 0.5)
+		l.BackgroundTransparency = 1
+		l.Font = Enum.Font.GothamBold
+		l.TextSize = 12
+		l.TextColor3 = Color3.fromRGB(244, 247, 252)
+		l.TextStrokeTransparency = 0.35
+		l.Size = UDim2.fromOffset(26, 14)
+		l.ZIndex = 6
+		l.Parent = self._ball
+		self._numPool[self._numUsed] = l
+	end
+	l.Visible = true
+	l.Position = UDim2.new(0.5, pos.X, 0.5, pos.Y)
+	l.Text = text
+end
+
+-- Draw the navball grid by projecting a unit sphere through the craft axes. `radOut/north/east`
+-- are the local-horizon world basis (zenith = radOut); right/up/look are the craft axes.
+function NavballController:_drawGrid(right, up, look, radOut, north, east)
+	local function project(dir)
+		if dir:Dot(look) < FRONT then
+			return nil
+		end
+		return Vector2.new(dir:Dot(right) * RADIUS, -dir:Dot(up) * RADIUS)
+	end
+	local function pt(latR, lonR)
+		local cl, sl = math.cos(latR), math.sin(latR)
+		return (north * math.cos(lonR) + east * math.sin(lonR)) * cl + radOut * sl
+	end
+
+	-- Latitude rings (+ the red horizon at lat 0).
+	local lats = { 0, -60, -30, 30, 60 }
+	for _, latDeg in ipairs(lats) do
+		local latR = math.rad(latDeg)
+		local color = (latDeg == 0) and HORIZON or GRID
+		local thick = (latDeg == 0) and 3 or 2
+		local prev
+		for k = 0, LON_SEG do
+			local p = project(pt(latR, (k / LON_SEG) * 2 * math.pi))
+			if p and prev then
+				self:_seg(prev, p, color, thick)
+			end
+			prev = p
+		end
+	end
+
+	-- Longitude meridians.
+	for lonDeg = 0, 359, LON_STEP do
+		local lonR = math.rad(lonDeg)
+		local prev
+		for k = -LAT_SEG, LAT_SEG do
+			local p = project(pt((k / LAT_SEG) * math.rad(80), lonR))
+			if p and prev then
+				self:_seg(prev, p, GRID, 1.5)
+			end
+			prev = p
+		end
+	end
+
+	-- Pitch numbers: each latitude line's label where it crosses the central column.
+	for _, latDeg in ipairs({ 30, 60, -30, -60 }) do
+		local latR = math.rad(latDeg)
+		local best, bestp
+		for k = 0, LON_SEG do
+			local p = project(pt(latR, (k / LON_SEG) * 2 * math.pi))
+			if p and (not best or math.abs(p.X) < best) then
+				best, bestp = math.abs(p.X), p
+			end
+		end
+		if bestp and best < RADIUS * 0.55 then
+			self:_num(bestp, tostring(math.abs(latDeg)))
+		end
+	end
+end
+
 -- Position a marker on the ball; hide it when behind the camera or when not shown.
 local function place(marker, d, right, up, look, show)
 	if not show then
@@ -378,36 +458,37 @@ function NavballController:_update(state, info)
 	local radOut = Vector3.new(p.x, p.y, p.z)
 	radOut = (radOut.Magnitude > 1e-3) and radOut.Unit or Vector3.yAxis
 
-	-- Horizon via the gradient: pitch moves the sky/ground transition, roll rotates it.
-	local pitch = math.clamp(look:Dot(radOut), -1, 1)
-	local hUp = radOut - look * look:Dot(radOut)
-	hUp = (hUp.Magnitude > 1e-3) and hUp.Unit or up
-	local roll = math.atan2(right:Dot(hUp), up:Dot(hUp))
-	self._grad.Rotation = 90 + math.deg(roll)
-	local t = math.clamp(0.5 + pitch * 0.5, 0.02, 0.98)
-	self._grad.Color = ColorSequence.new({
-		ColorSequenceKeypoint.new(0, SKY),
-		ColorSequenceKeypoint.new(math.max(t - 0.012, 0.01), SKY),
-		ColorSequenceKeypoint.new(t, GROUND),
-		ColorSequenceKeypoint.new(1, GROUND),
-	})
-
-	-- Horizon line + pitch ladder, aligned to the gradient transition and rolled to match.
-	local rollDeg = math.deg(roll)
-	local axisX, axisY = -math.sin(roll), math.cos(roll)
-	local hp = pitch * RADIUS
-	setLine(self._horizon, axisX, axisY, hp, nil, rollDeg)
-	for _, rung in ipairs(self._rungs) do
-		setLine(rung.line, axisX, axisY, hp + rung.px, RADIUS * 0.5, rollDeg)
-	end
-
-	-- Heading (compass): nose's horizontal direction relative to the pole-ward "north".
+	-- Pole-ward "north" + "east" in the local horizon (same reference the heading uses).
 	local north = Vector3.yAxis - radOut * radOut:Dot(Vector3.yAxis)
 	if north.Magnitude < 1e-3 then
 		north = Vector3.xAxis - radOut * radOut:Dot(Vector3.xAxis)
 	end
 	north = north.Unit
 	local east = radOut:Cross(north)
+
+	-- Soft sky/ground fill behind the grid (the projected red line is the crisp horizon).
+	local pitch = math.clamp(look:Dot(radOut), -1, 1)
+	local roll = math.atan2(right:Dot(radOut - look * look:Dot(radOut)), up:Dot(radOut - look * look:Dot(radOut)))
+	self._grad.Rotation = 90 + math.deg(roll)
+	local t = math.clamp(0.5 + pitch * 0.5, 0.05, 0.95)
+	self._grad.Color = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, SKY),
+		ColorSequenceKeypoint.new(math.clamp(t - 0.16, 0.02, 0.97), SKY),
+		ColorSequenceKeypoint.new(math.clamp(t + 0.16, 0.03, 0.98), GROUND),
+		ColorSequenceKeypoint.new(1, GROUND),
+	})
+
+	-- Projected sphere grid.
+	self._segUsed, self._numUsed = 0, 0
+	self:_drawGrid(right, up, look, radOut, north, east)
+	for i = self._segUsed + 1, #self._segPool do
+		self._segPool[i].Visible = false
+	end
+	for i = self._numUsed + 1, #self._numPool do
+		self._numPool[i].Visible = false
+	end
+
+	-- Heading (compass): nose's horizontal direction relative to north.
 	local noseH = look - radOut * look:Dot(radOut)
 	if noseH.Magnitude > 1e-3 then
 		noseH = noseH.Unit
