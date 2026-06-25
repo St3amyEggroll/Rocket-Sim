@@ -231,6 +231,14 @@ Config.RENDER = {
 
 -- Docking: leave a craft (with a docking port) in a stable orbit; it persists as a "vessel"
 -- you can rendezvous with on later flights. Two ports that meet slowly enough latch together.
+-- Electric charge: a power economy. Command pods + batteries store charge; solar panels
+-- generate it when sunlit; the reaction wheels (SAS attitude authority) draw it. At zero charge
+-- the wheels go dead -- you keep only engine-gimbal steering while burning, until solar recharges.
+Config.POWER = {
+	passiveDraw = 0.2, -- EC/s baseline avionics draw
+	reactionWheelDraw = 4, -- additional EC/s at full reaction-wheel torque
+}
+
 Config.DOCKING = {
 	maxVessels = 4, -- per save slot (oldest dropped past this)
 	dockDist = 14, -- ports within this many studs...

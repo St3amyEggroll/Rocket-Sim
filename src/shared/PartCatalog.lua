@@ -27,6 +27,8 @@ PartCatalog.parts = {
 		color = Color3.fromRGB(205, 210, 220),
 		shape = "pod",
 		drag = 0.2,
+		ecStorage = 150, -- built-in battery (electric charge)
+		crewCapacity = 1,
 	},
 	TankS = {
 		id = "TankS",
@@ -323,6 +325,32 @@ PartCatalog.parts = {
 		drag = 0.06,
 		dock = true, -- lets the craft be left in orbit + latch onto another port
 	},
+	SolarPanel = {
+		id = "SolarPanel",
+		name = "Solar Panel",
+		category = "structure",
+		mass = 0.04,
+		height = 0,
+		radius = 1.2,
+		color = Color3.fromRGB(54, 84, 150),
+		shape = "solar",
+		drag = 0.05,
+		radial = true, -- surface-mounts; generates charge when sunlit
+		ecGen = 12, -- EC/s at full sun
+	},
+	Battery = {
+		id = "Battery",
+		name = "Battery Pack",
+		category = "structure",
+		mass = 0.05,
+		height = 0,
+		radius = 1.0,
+		color = Color3.fromRGB(150, 154, 162),
+		shape = "battery",
+		drag = 0.04,
+		radial = true,
+		ecStorage = 400, -- electric-charge storage
+	},
 }
 
 -- Display order in the VAB palette.
@@ -351,6 +379,8 @@ PartCatalog.order = {
 	"Thermometer",
 	"Barometer",
 	"DockingPort",
+	"SolarPanel",
+	"Battery",
 }
 
 function PartCatalog.get(id)

@@ -328,8 +328,10 @@ function FlightController:_updateRotation(dt, pos, vel, powered, throttle)
 	local up = self._attitude.UpVector
 	local look = self._attitude.LookVector
 
-	-- Control authority (rad/s^2): weak reaction wheels, plus gimbal while burning.
-	local authority = C.reactionWheelAccel + (powered and (C.gimbalAccel * throttle) or 0)
+	-- Control authority (rad/s^2): weak reaction wheels (electric, so dead at zero charge),
+	-- plus engine gimbal while burning (gimbal needs no power).
+	local wheel = self._vehicle:HasCharge() and C.reactionWheelAccel or 0
+	local authority = wheel + (powered and (C.gimbalAccel * throttle) or 0)
 
 	local accel = Vector3.zero
 	if sas == "Manual" then
@@ -350,6 +352,9 @@ function FlightController:_updateRotation(dt, pos, vel, powered, throttle)
 			end
 		end
 	end
+
+	-- How hard the (electric) reaction wheels are working this frame -> power draw.
+	self._ctrlEffort = (wheel > 0) and math.clamp(accel.Magnitude / C.reactionWheelAccel, 0, 1) or 0
 
 	-- Aerodynamic torque: drag acts at the centre of pressure, offset from the centre
 	-- of mass along the nose. Behind CoM (margin > 0) -> weathervanes prograde; ahead
@@ -422,6 +427,7 @@ function FlightController:_fire(extra)
 	extra.mode = self._mode:GetMode()
 	extra.isMenu = self._mode:IsMenu()
 	extra.missionTime = self._missionTime
+	extra.charge = self._vehicle:GetChargeFrac()
 	extra.nose = self._attitude.LookVector
 	extra.attitude = self._attitude
 	extra.mapMode = self._input:GetMapMode()
@@ -453,6 +459,22 @@ function FlightController:_fire(extra)
 	extra.planetSoi = self._planetSoi
 	extra.terraCenter = T
 	self.Updated:Fire(self._state, extra)
+end
+
+-- How sunlit the craft is (1 = full sun, 0 = in the active body's shadow), for solar power.
+-- A simple cylindrical-shadow test against the active body, in its own (relative) frame.
+function FlightController:_sunlitFactor(pos, sunDir)
+	if self._bodyId == "sun" then
+		return 1
+	end
+	local along = -(pos.x * sunDir.X + pos.y * sunDir.Y + pos.z * sunDir.Z)
+	if along <= 0 then
+		return 1 -- sun-facing side
+	end
+	local px = pos.x + sunDir.X * along
+	local py = pos.y + sunDir.Y * along
+	local pz = pos.z + sunDir.Z * along
+	return (math.sqrt(px * px + py * py + pz * pz) < self._bodyRadius) and 0 or 1
 end
 
 function FlightController:_step(rawDt)
@@ -498,6 +520,7 @@ function FlightController:_step(rawDt)
 	if self._landed and throttle <= 0 then
 		self._status = "Landed"
 		self._omega = Vector3.zero -- sitting on the pad: no tumble
+		self._ctrlEffort = 0
 		sas = self._input:GetSAS()
 	else
 		local thrustAccel = self._vehicle:GetThrustAccel(throttle)
@@ -568,6 +591,11 @@ function FlightController:_step(rawDt)
 	-- Advance mission time (the moon orbits on rails) and hop SOIs if we crossed one.
 	self._missionTime += dt * effWarp
 	self:_checkSOI()
+
+	-- Power balance: solar charges when sunlit (over mission time, so it works through warp),
+	-- reaction wheels + avionics drain over real time.
+	local sunFactor = self:_sunlitFactor(self._state.position, self:GetSunDir())
+	self._vehicle:UpdatePower(dt, dt * effWarp, sunFactor, self._ctrlEffort or 0)
 
 	self._powered = powered
 	self._origin:UpdateForBody(vadd(self._state.position, self:_bodyCenter()))

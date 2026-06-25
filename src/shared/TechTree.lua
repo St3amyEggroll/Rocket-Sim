@@ -40,6 +40,8 @@ TechTree.nodes = {
 		parts = { "EngineLarge" } },
 	{ id = "boosters", name = "Boosters", col = 2, row = 5, cost = 10, requires = { "engineering" },
 		parts = { "SRB", "SRBLarge", "RadialDecoupler" } },
+	{ id = "electrics", name = "Electrics", col = 2, row = 4, cost = 9, requires = { "generalRocketry" },
+		parts = { "SolarPanel", "Battery" } },
 
 	-- Third ring.
 	{ id = "advFuelSystems", name = "Adv. Fuel Systems", col = 3, row = 2, cost = 16, requires = { "fuelSystems" },

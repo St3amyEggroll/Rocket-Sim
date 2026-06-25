@@ -722,12 +722,62 @@ end
 
 function VehicleController:ResetRuntime()
 	self._stageIndex = 1
+	self._charge = nil -- nil -> _computePower refills to full capacity
 	self._sectionFuel = {}
 	for root, cap in pairs(self._sectionCapacity or {}) do
 		self._sectionFuel[root] = cap
 	end
 	self:_computeActive()
 	self.Changed:Fire()
+end
+
+-- Electric-charge capacity + generation of the active craft. Refills to full only on a reset
+-- (when _charge is nil); otherwise it just clamps the live charge to the new capacity.
+function VehicleController:_computePower()
+	local cap, gen = 0, 0
+	for i, p in ipairs(self._parts) do
+		if self:_isActive(i) then
+			cap += p.def.ecStorage or 0
+			gen += p.def.ecGen or 0
+		end
+	end
+	self._ecCap = cap
+	self._ecGenMax = gen
+	if self._charge == nil then
+		self._charge = cap
+	elseif self._charge > cap then
+		self._charge = cap
+	end
+end
+
+-- Tick the power balance. Solar generation accrues over MISSION time (so it charges through
+-- time warp, as on rails), while the avionics + reaction-wheel draw accrues over REAL time (so
+-- warping doesn't drain the battery). controlEffort is the fraction of reaction-wheel torque used.
+function VehicleController:UpdatePower(realDt, missionDt, sunFactor, controlEffort)
+	local cap = self._ecCap or 0
+	if cap <= 0 then
+		return
+	end
+	local gen = (self._ecGenMax or 0) * math.clamp(sunFactor or 0, 0, 1) * missionDt
+	local C = Config.POWER
+	local draw = (C.passiveDraw + C.reactionWheelDraw * math.clamp(controlEffort or 0, 0, 1)) * realDt
+	self._charge = math.clamp((self._charge or cap) + gen - draw, 0, cap)
+end
+
+-- Reaction wheels work while there's charge (a craft with no electrical system never bricks).
+function VehicleController:HasCharge(): boolean
+	if (self._ecCap or 0) <= 0 then
+		return true
+	end
+	return (self._charge or 0) > 0.01
+end
+
+function VehicleController:GetChargeFrac(): number
+	local cap = self._ecCap or 0
+	if cap <= 0 then
+		return 1
+	end
+	return math.clamp((self._charge or 0) / cap, 0, 1)
 end
 
 -- Recompute which parts are still attached. In the VAB the whole craft is shown; in
@@ -742,6 +792,7 @@ function VehicleController:_computeActive()
 			active[i] = true
 		end
 		self._active = active
+		self:_computePower()
 		return
 	end
 
@@ -784,6 +835,7 @@ function VehicleController:_computeActive()
 		end
 	end
 	self._active = active
+	self:_computePower()
 end
 
 function VehicleController:_isActive(i)

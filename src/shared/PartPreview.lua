@@ -144,6 +144,17 @@ function PartPreview.geometry(model, def)
 		cyl(model, h * 0.18, r * 0.62, Color3.fromRGB(28, 30, 36), SMOOTH, h * 0.34) -- recessed hub
 		block(model, Vector3.new(r * 1.5, 0.18, 0.3), Color3.fromRGB(232, 196, 60), SMOOTH, CFrame.new(0, h * 0.45, 0)) -- target cross
 		block(model, Vector3.new(0.3, 0.18, r * 1.5), Color3.fromRGB(232, 196, 60), SMOOTH, CFrame.new(0, h * 0.45, 0))
+	elseif sh == "solar" then
+		-- A solar panel: a small mount + a flat blue panel on an arm (built along +X so it
+		-- extends outward when surface-mounted).
+		block(model, Vector3.new(r * 0.8, r * 0.9, r * 0.7), STEEL, METAL, CFrame.new(0, 0, 0))
+		block(model, Vector3.new(r * 1.2, 0.18, 0.3), STEEL, METAL, CFrame.new(r * 0.9, 0, 0)) -- arm
+		local panel = block(model, Vector3.new(r * 2.6, 0.16, r * 1.5), Color3.fromRGB(36, 64, 140), SMOOTH, CFrame.new(r * 2.0, 0, 0))
+		panel.Reflectance = 0.25
+	elseif sh == "battery" then
+		block(model, Vector3.new(r * 1.0, r * 1.5, r * 1.7), def.color, SMOOTH, CFrame.new(0, 0, 0))
+		block(model, Vector3.new(r * 0.3, r * 0.5, r * 0.5), Color3.fromRGB(232, 196, 60), SMOOTH, CFrame.new(r * 0.5, r * 0.55, 0))
+		block(model, Vector3.new(r * 0.3, r * 0.5, r * 0.5), Color3.fromRGB(40, 40, 46), SMOOTH, CFrame.new(r * 0.5, -r * 0.55, 0))
 	else
 		-- fuel tank: body + thin end rings for detail
 		cyl(model, h, r, def.color, SMOOTH, 0)

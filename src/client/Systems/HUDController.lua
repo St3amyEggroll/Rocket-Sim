@@ -132,6 +132,7 @@ function HUDController:_build(parent)
 	L.throttle = newRow(veh, 5, 18, 15)
 	L.thrustMode = newRow(veh, 6, 18, 15)
 	L.warp = newRow(veh, 7, 18, 15)
+	L.charge = newRow(veh, 8, 18, 15)
 
 	local hint = Instance.new("TextLabel")
 	hint.Name = "Hint"
@@ -216,6 +217,15 @@ function HUDController:_update(state, info)
 	L.throttle.Text = "Throttle:  " .. math.floor(info.throttle * 100 + 0.5) .. "%"
 	L.thrustMode.Text = "SAS:       " .. tostring(info.sas)
 	L.warp.Text = "Warp:      " .. (info.warp or 1) .. "x"
+
+	local charge = info.charge
+	if charge then
+		local pct = math.floor(charge * 100 + 0.5)
+		L.charge.Text = "Charge:    " .. pct .. "%" .. (charge <= 0.001 and "  (DEAD)" or "")
+		L.charge.TextColor3 = (charge <= 0.001) and Color3.fromRGB(255, 90, 90)
+			or (charge < 0.2) and Color3.fromRGB(255, 200, 120)
+			or Color3.fromRGB(150, 230, 170)
+	end
 end
 
 return HUDController
