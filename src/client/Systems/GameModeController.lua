@@ -28,9 +28,14 @@ end
 
 function GameModeController:Start()
 	local Input = Registry:Get("InputController")
+	self._vehicle = Registry:Get("VehicleController")
 	Input:GetToggleModeSignal():Connect(function()
 		-- B only toggles build<->flight while in the game (ignored in menus / research).
 		if self._mode == "VAB" then
+			-- Can't fly an uncontrolled stack: a command pod (or probe core) is required.
+			if self._vehicle and not self._vehicle:HasControl() then
+				return
+			end
 			self:SetMode("Flight")
 		elseif self._mode == "Flight" then
 			self:SetMode("VAB")

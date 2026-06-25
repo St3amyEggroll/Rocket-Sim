@@ -68,6 +68,53 @@ local function diag(parent, rot, color, zindex)
 	b.Rotation = rot
 end
 
+-- A thin horizontal line on the ball (the horizon / a pitch-ladder rung). Width is set per frame.
+local function makeLine(parent, thick, color, transparency)
+	local l = Instance.new("Frame")
+	l.AnchorPoint = Vector2.new(0.5, 0.5)
+	l.Size = UDim2.fromOffset(2, thick)
+	l.BackgroundColor3 = color
+	l.BackgroundTransparency = transparency or 0.1
+	l.BorderSizePixel = 0
+	l.ZIndex = 5
+	l.Parent = parent
+	return l
+end
+
+-- Place a line at signed distance `distPx` along the ball's vertical (gradient) axis
+-- (axisX,axisY), fit to the circle's chord at that height and rolled to match attitude.
+local function setLine(line, axisX, axisY, distPx, maxLen, rollDeg)
+	if math.abs(distPx) >= RADIUS - 1 then
+		line.Visible = false
+		return
+	end
+	line.Visible = true
+	local chord = 2 * math.sqrt(RADIUS * RADIUS - distPx * distPx)
+	local len = maxLen and math.min(chord, maxLen) or chord
+	line.Size = UDim2.fromOffset(len, line.Size.Y.Offset)
+	line.Position = UDim2.new(0.5, axisX * distPx, 0.5, axisY * distPx)
+	line.Rotation = rollDeg
+end
+
+-- A circular shading overlay (top highlight / bottom shadow) so the disc reads as a 3D ball.
+local function shadeOverlay(parent, color, transparencySeq)
+	local o = Instance.new("Frame")
+	o.AnchorPoint = Vector2.new(0.5, 0.5)
+	o.Position = UDim2.fromScale(0.5, 0.5)
+	o.Size = UDim2.fromScale(1, 1)
+	o.BackgroundColor3 = color
+	o.BorderSizePixel = 0
+	o.ZIndex = 2
+	o.Parent = parent
+	corner(o, 1)
+	local g = Instance.new("UIGradient")
+	g.Rotation = 90
+	g.Color = ColorSequence.new(color)
+	g.Transparency = transparencySeq
+	g.Parent = o
+	return o
+end
+
 -- Build one prograde/retrograde/radial/normal marker icon.
 local function makeMarker(parent, kind, color, z)
 	z = z or 8
@@ -150,6 +197,26 @@ function NavballController:_build(parent)
 	grad.Parent = ball
 	self._ball = ball
 	self._grad = grad
+
+	-- Spherical shading: a soft highlight up top and a shadow at the bottom give the flat disc
+	-- some 3D depth (a ball lit from above).
+	shadeOverlay(ball, Color3.fromRGB(255, 255, 255), NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0.62),
+		NumberSequenceKeypoint.new(0.5, 1),
+		NumberSequenceKeypoint.new(1, 1),
+	}))
+	shadeOverlay(ball, Color3.fromRGB(0, 0, 0), NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 1),
+		NumberSequenceKeypoint.new(0.55, 1),
+		NumberSequenceKeypoint.new(1, 0.78),
+	}))
+
+	-- Horizon line + pitch-ladder rungs (drawn over the gradient; positioned each frame).
+	self._horizon = makeLine(ball, 3, Color3.fromRGB(245, 248, 252), 0.05)
+	self._rungs = {}
+	for _, f in ipairs({ -2 / 3, -1 / 3, 1 / 3, 2 / 3 }) do
+		self._rungs[#self._rungs + 1] = { line = makeLine(ball, 2, Color3.fromRGB(208, 215, 226), 0.4), px = f * RADIUS }
+	end
 
 	-- Centre reticle (the nose / where you point + thrust).
 	local center = Instance.new("TextLabel")
@@ -324,6 +391,15 @@ function NavballController:_update(state, info)
 		ColorSequenceKeypoint.new(t, GROUND),
 		ColorSequenceKeypoint.new(1, GROUND),
 	})
+
+	-- Horizon line + pitch ladder, aligned to the gradient transition and rolled to match.
+	local rollDeg = math.deg(roll)
+	local axisX, axisY = -math.sin(roll), math.cos(roll)
+	local hp = pitch * RADIUS
+	setLine(self._horizon, axisX, axisY, hp, nil, rollDeg)
+	for _, rung in ipairs(self._rungs) do
+		setLine(rung.line, axisX, axisY, hp + rung.px, RADIUS * 0.5, rollDeg)
+	end
 
 	-- Heading (compass): nose's horizontal direction relative to the pole-ward "north".
 	local north = Vector3.yAxis - radOut * radOut:Dot(Vector3.yAxis)

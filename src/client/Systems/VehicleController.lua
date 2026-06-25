@@ -1056,6 +1056,17 @@ function VehicleController:GetChuteDragArea(): number
 	return a
 end
 
+-- True if the active craft has a command/control part: a command pod (or a future probe
+-- "robot" core, flagged def.control). Required to launch -- no uncontrolled stacks.
+function VehicleController:HasControl(): boolean
+	for i, p in ipairs(self._parts) do
+		if self:_isActive(i) and (p.def.category == "command" or p.def.control == true) then
+			return true
+		end
+	end
+	return false
+end
+
 -- True if the active craft carries landing legs (a more forgiving touchdown).
 function VehicleController:HasLandingLegs(): boolean
 	for i, p in ipairs(self._parts) do

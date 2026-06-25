@@ -199,10 +199,16 @@ function CameraController:_update(state, info)
 	-- Render at the Terra-centric position (state is relative to the active body).
 	local bc = (info and info.bodyCenter) or Orbit.vec(0, 0, 0)
 	local craftRender = self._origin:ToRender(Orbit.vec(p.x + bc.x, p.y + bc.y, p.z + bc.z))
+	-- Aim at the MIDDLE of the rocket (half its length up the nose), not the base/engine.
+	local nose = (info and info.pointDir) or Vector3.yAxis
+	if typeof(nose) ~= "Vector3" then
+		nose = Vector3.new(nose.x or 0, nose.y or 0, nose.z or 0)
+	end
+	local target = craftRender + nose * (self._vehicle:GetHeight() * 0.5)
 	local behind = CFrame.fromAxisAngle(up, orbit.azimuth) * (-fwd)
 	local offsetDir = behind * math.cos(orbit.elevation) + up * math.sin(orbit.elevation)
-	local camPos = craftRender + offsetDir * orbit.distance
-	cam.CFrame = CFrame.lookAt(camPos, craftRender, up)
+	local camPos = target + offsetDir * orbit.distance
+	cam.CFrame = CFrame.lookAt(camPos, target, up)
 end
 
 return CameraController

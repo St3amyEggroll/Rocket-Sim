@@ -97,13 +97,13 @@ function LaunchSiteController:_build()
 			box(model, Vector3.new(8, padH + 12, 8), DARKCON, Enum.Material.Concrete, at(sx, padH - (padH + 12) / 2, sz))
 		end
 	end
-	-- launch mount (the dark deck the rocket stands on) + a flame hole in the middle.
-	box(model, Vector3.new(30, 3, 30), METALDARK, Enum.Material.DiamondPlate, at(0, padH + 1.5, 0))
-	box(model, Vector3.new(12, 5, 12), Color3.fromRGB(18, 18, 22), Enum.Material.SmoothPlastic, at(0, padH + 0.5, 0))
-	-- hold-down clamps ringing the mount.
+	-- A flush metal deck plate: its top sits exactly at the deck height (= the craft's base),
+	-- so the rocket stands ON it -- no raised mount or recessed hole for it to sink into.
+	box(model, Vector3.new(34, 2, 34), METALDARK, Enum.Material.DiamondPlate, at(0, padH - 1, 0))
+	-- hold-down clamps standing beside the rocket base.
 	for i = 0, 3 do
 		local a = i * math.pi / 2
-		box(model, Vector3.new(2.5, 9, 2.5), STEEL, Enum.Material.Metal, at(math.cos(a) * 11, padH + 4, math.sin(a) * 11))
+		box(model, Vector3.new(2.4, 6, 2.4), STEEL, Enum.Material.Metal, at(math.cos(a) * 11, padH + 3, math.sin(a) * 11))
 	end
 
 	self._model = model

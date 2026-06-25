@@ -873,15 +873,19 @@ function VABController:_refresh()
 	if prof.mass > 0 then
 		lines[#lines + 1] = "Stability  " .. (prof.margin > 0 and "STABLE" or "UNSTABLE")
 	end
-	if stats.stageCount == 0 then
+	local hasControl = self._vehicle:HasControl()
+	if not hasControl then
+		lines[#lines + 1] = ""
+		lines[#lines + 1] = "! Add a command pod."
+	elseif stats.stageCount == 0 then
 		lines[#lines + 1] = ""
 		lines[#lines + 1] = "! Add an engine to launch."
 	end
 	self._craftLabel.Text = table.concat(lines, "\n")
 
-	local ready = stats.stageCount > 0
+	local ready = stats.stageCount > 0 and hasControl
 	self._launchBtn.BackgroundColor3 = ready and Color3.fromRGB(60, 170, 90) or Color3.fromRGB(60, 70, 64)
-	self._launchBtn.Text = ready and "LAUNCH" or "ADD AN ENGINE"
+	self._launchBtn.Text = (not hasControl) and "ADD A POD" or (stats.stageCount == 0 and "ADD AN ENGINE" or "LAUNCH")
 	self._launchBtn.Active = ready
 	self._launchBtn.AutoButtonColor = ready
 end
