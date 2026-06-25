@@ -202,6 +202,7 @@ Config.LAUNCH = {
 	-- The launch pad is a raised platform: its deck (and the craft's base) sit this many studs
 	-- above the terrain at the site, so the rocket stands ON the pad instead of in the ground.
 	padHeight = 10,
+	padFootprint = 34, -- the deck counts as solid ground within this many studs of the site
 }
 
 -- Attitude is now a real rigid-body rotation: the craft has angular velocity and a

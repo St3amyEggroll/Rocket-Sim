@@ -91,6 +91,8 @@ function FlightController:Init()
 	-- not flush with the ground.
 	self._launchRadius = Planet.radiusForSim(Orbit.vec(ld.X * body.radius, ld.Y * body.radius, ld.Z * body.radius))
 		+ (Config.LAUNCH.padHeight or 0)
+	-- The raised pad deck counts as solid ground within this angular footprint of the site.
+	self._padFootprintCos = math.cos((Config.LAUNCH.padFootprint or 34) / math.max(self._launchRadius, 1))
 
 	-- Nose points radial-out (along the launch direction).
 	self._state = {
@@ -587,6 +589,17 @@ function FlightController:_step(rawDt)
 	})
 end
 
+-- The launch pad deck is solid ground over its footprint: returns the (raised) deck radius
+-- when a unit direction points within the pad around the launch site, else nil.
+function FlightController:_padSurfaceRadius(ux, uy, uz)
+	local ld = self._launchDir
+	local d = ux * ld.X + uy * ld.Y + uz * ld.Z
+	if d >= self._padFootprintCos then
+		return self._launchRadius
+	end
+	return nil
+end
+
 -- Whole-body terrain collision: sample the entire rocket (base -> nose), so ANY
 -- part touching the ground counts (a sideways/tumbling craft hits on its side, not
 -- just the engine). If the deepest point has reached the terrain, rest the craft on
@@ -613,6 +626,14 @@ function FlightController:_checkTouchdown()
 		local wr = math.sqrt(wx * wx + wy * wy + wz * wz)
 		if wr > 1e-6 then
 			local surf = onMoon and moonR or Planet.radiusForUnit(wx / wr, wy / wr, wz / wr)
+			if not onMoon then
+				-- The raised launch pad deck is solid ground over its footprint, so the rocket
+				-- rests ON the pad instead of dropping to the terrain below it.
+				local pad = self:_padSurfaceRadius(wx / wr, wy / wr, wz / wr)
+				if pad and pad > surf then
+					surf = pad
+				end
+			end
 			local pen = surf - wr
 			if pen > maxPen then
 				maxPen = pen
