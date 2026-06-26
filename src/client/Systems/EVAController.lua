@@ -5,11 +5,15 @@
 	finite monopropellant budget), take a surface SAMPLE (science), PLANT a flag (persistent),
 	and BOARD to climb back in.
 
-	The craft sim is custom (floating origin, spherical gravity), so the kerbal is moved
-	kinematically rather than with a stock Humanoid: it's snapped to the local surface and
-	oriented to local-up, which is robust anywhere on the planet (a physics Humanoid would fall
-	toward world -Y and tip over off the equator). State lives in the body-relative sim frame and
-	renders through the floating origin, exactly like the craft.
+	The kerbal IS the player's real Roblox avatar (the same Humanoid rig the crew rider uses,
+	fetched with Players:CreateHumanoidModelFromUserId), with its walk animation played while
+	moving. The craft sim is custom (floating origin, spherical gravity), so the avatar is moved
+	KINEMATICALLY rather than by Humanoid physics: only its root is anchored and we snap it to the
+	local surface and align it to local-up each frame, which is robust anywhere on the planet (a
+	physics Humanoid walks toward world -Y and would tip over off the equator). The limbs stay
+	jointed so the animation still plays. State lives in the body-relative sim frame and renders
+	through the floating origin, exactly like the craft. (A blocky stand-in is used only if the
+	avatar fetch fails.)
 
 	Entered/left via GameMode "EVA"; the craft stays parked where it landed (FlightController
 	skips its reset for EVA <-> Flight). Flags + crew mirror the server's State push.
@@ -67,6 +71,7 @@ function EVAController:Init()
 	self._crew = {}
 	self._flags = {}
 	self._mono = MONO_MAX
+	self._footH = FOOT -- pivot height above the surface (recomputed for the real avatar)
 end
 
 function EVAController:Start()
@@ -88,7 +93,27 @@ function EVAController:Start()
 		self._stateEv:FireServer() -- request our profile (crew + flags)
 	end
 
+	-- Use the player's real Roblox avatar as the kerbal. The fetch yields, so start with a blocky
+	-- stand-in immediately and swap to the avatar once it loads.
 	self._kerbal = self:_buildKerbal()
+	self._kerbal.Parent = nil
+	task.spawn(function()
+		local model
+		local ok = pcall(function()
+			model = Players:CreateHumanoidModelFromUserId(Players.LocalPlayer.UserId)
+		end)
+		if ok and model then
+			self:_prepAvatar(model)
+			self._footH = self:_measureFootH(model)
+			local old = self._kerbal
+			self._kerbal = model
+			model.Parent = self._active and Workspace or nil
+			if old and old ~= model then
+				old:Destroy()
+			end
+		end
+	end)
+
 	self._flagFolder = Instance.new("Folder")
 	self._flagFolder.Name = "Flags"
 	self._flagFolder.Parent = Workspace
@@ -146,22 +171,34 @@ function EVAController:_enter()
 	local side = up:Cross(Vector3.yAxis)
 	side = (side.Magnitude > 1e-3) and side.Unit or up:Cross(Vector3.xAxis).Unit
 	local dir = (pos + side * 8).Unit
-	local r = surfaceR(self._bodyId, dir) + FOOT
+	local r = surfaceR(self._bodyId, dir) + self._footH
 	self._evaPos = Orbit.vec(dir.X * r, dir.Y * r, dir.Z * r)
 	self._facing = side
 
-	self._kerbal.Parent = Workspace
+	if self._kerbal then
+		self._kerbal.Parent = Workspace
+	end
 	self._gui.Enabled = true
 	self._title.Text = "EVA — " .. self._crewName
 end
 
 function EVAController:_exit()
 	self._active = false
-	self._kerbal.Parent = nil
+	if self._walkTrack and self._walkTrack.IsPlaying then
+		pcall(function()
+			self._walkTrack:Stop()
+		end)
+	end
+	if self._kerbal then
+		self._kerbal.Parent = nil
+	end
 	self._gui.Enabled = false
 end
 
 function EVAController:_step(dt)
+	if not self._kerbal then
+		return
+	end
 	local pos = Vector3.new(self._evaPos.x, self._evaPos.y, self._evaPos.z)
 	local r = pos.Magnitude
 	local up = (r > 1e-3) and pos.Unit or Vector3.yAxis
@@ -194,7 +231,7 @@ function EVAController:_step(dt)
 		self._evaVr = (self._evaVr or 0) - g * dt
 	end
 	local newR = r + self._evaVr * dt
-	local ground = surfaceR(self._bodyId, pos.Unit) + FOOT
+	local ground = surfaceR(self._bodyId, pos.Unit) + self._footH
 	if newR <= ground then
 		newR = ground
 		self._evaVr = 0
@@ -211,8 +248,22 @@ function EVAController:_step(dt)
 	self._evaRender = self._origin:ToRender(abs)
 	self._evaUp = pos.Unit
 	self._kerbal:PivotTo(frameFromUp(self._evaRender, pos.Unit, self._facing or fwd))
+	self:_setWalking(move.Magnitude > 1e-3)
 
 	self._monoFill.Size = UDim2.new(self._mono / MONO_MAX, 0, 1, 0)
+end
+
+-- Play/stop the avatar's walk loop based on whether it's moving (no-op for the blocky stand-in).
+function EVAController:_setWalking(moving)
+	local t = self._walkTrack
+	if not t then
+		return
+	end
+	if moving and not t.IsPlaying then
+		t:Play(0.15)
+	elseif not moving and t.IsPlaying then
+		t:Stop(0.15)
+	end
 end
 
 -- For the camera (chase the kerbal).
@@ -277,6 +328,62 @@ local function block(parent, size, color, cf, mat)
 	p.CFrame = cf
 	p.Parent = parent
 	return p
+end
+
+-- Prepare the player's real avatar for kinematic EVA: only the root is anchored (so the limbs
+-- stay jointed and can animate), collisions/queries off, the Humanoid state machine frozen, and
+-- a rig-appropriate walk loop loaded that _setWalking plays while moving. Default Animate scripts
+-- are removed so they don't fight the manual track.
+function EVAController:_prepAvatar(model)
+	model.Name = "EVAKerbal"
+	local hum = model:FindFirstChildOfClass("Humanoid")
+	local root = model:FindFirstChild("HumanoidRootPart") or model.PrimaryPart
+	model.PrimaryPart = root
+	if hum then
+		hum.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
+		hum.AutoRotate = false
+		pcall(function()
+			hum.EvaluateStateMachine = false
+		end)
+	end
+	for _, d in ipairs(model:GetDescendants()) do
+		if d:IsA("BaseScript") then
+			d:Destroy()
+		elseif d:IsA("BasePart") then
+			d.CanCollide = false
+			d.CanQuery = false
+			d.CanTouch = false
+			d.Massless = true
+			d.Anchored = (d == root) -- only the root is anchored; limbs follow via Motor6D + animation
+		end
+	end
+	local animator = hum and hum:FindFirstChildOfClass("Animator")
+	if animator then
+		local anim = Instance.new("Animation")
+		-- Roblox default walk animations (rig-appropriate).
+		anim.AnimationId = (hum.RigType == Enum.HumanoidRigType.R6) and "rbxassetid://180426354"
+			or "rbxassetid://913376220"
+		local ok, track = pcall(function()
+			return animator:LoadAnimation(anim)
+		end)
+		if ok and track then
+			track.Looped = true
+			self._walkTrack = track
+		end
+	end
+end
+
+-- Distance from the avatar's pivot (its HumanoidRootPart, at mid-torso) down to its feet, so we
+-- can rest its feet -- not its waist -- on the surface.
+function EVAController:_measureFootH(model)
+	local ok, half = pcall(function()
+		model:PivotTo(CFrame.new()) -- stand upright at the origin to measure axis-aligned extents
+		return model:GetExtentsSize().Y * 0.5
+	end)
+	if ok and half and half > 0.5 then
+		return half
+	end
+	return FOOT
 end
 
 -- A small blocky astronaut, built in a local frame (feet at y=0, +Y up, facing +Z(look)).

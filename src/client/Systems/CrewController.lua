@@ -121,8 +121,9 @@ function CrewController:_ride(state, info)
 		return
 	end
 
-	-- Map view shows a compressed orbit near the origin; hide the real rider.
-	if info and info.mapMode then
+	-- Map view shows a compressed orbit near the origin; hide the real rider. Also hide it during
+	-- EVA -- the crew member is out walking as the EVA avatar, so it shouldn't also sit on the craft.
+	if info and (info.mapMode or info.mode == "EVA") then
 		if model.Parent then
 			model.Parent = nil
 		end
