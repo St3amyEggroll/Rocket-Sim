@@ -701,6 +701,34 @@ function VehicleController:SetPartStage(index, stage)
 	self:SetPartsStage({ index }, stage)
 end
 
+-- Move the stage at position `from` to position `to`, shifting the others (drag-to-reorder a
+-- whole stage card). Renumbers every actuator's stage through the resulting permutation.
+function VehicleController:ReorderStage(from, to)
+	local n = self:GetStageCount()
+	from = math.clamp(math.floor(from), 1, n)
+	to = math.clamp(math.floor(to), 1, n)
+	if from == to then
+		return
+	end
+	local order = {}
+	for s = 1, n do
+		order[s] = s
+	end
+	table.remove(order, from)
+	table.insert(order, to, from)
+	local map = {} -- oldStage -> newPosition
+	for newIdx, oldStage in ipairs(order) do
+		map[oldStage] = newIdx
+	end
+	self._autoStage = false
+	for _, p in ipairs(self._parts) do
+		if isActuator(p.def) and p.stage and map[p.stage] then
+			p.stage = map[p.stage]
+		end
+	end
+	self:_recompute()
+end
+
 -- Swap two stages' fire order (▲▼ in the panel).
 function VehicleController:SwapStages(a, b)
 	if a == b then
