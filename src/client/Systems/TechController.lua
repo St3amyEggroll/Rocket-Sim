@@ -181,8 +181,14 @@ function TechController:_checkMilestones(state, info)
 	if not info or info.mode ~= "Flight" then
 		return
 	end
+	local R = self._reported
 	local bodyId = info.bodyId
 	if bodyId == "planet" then
+		-- Once every Terra milestone is earned there's nothing left to detect: skip the
+		-- per-frame sqrt + orbit readout for the rest of the flight.
+		if R.alt5k and R.alt25k and R.space and R.orbit then
+			return
+		end
 		local p = state.position
 		local r = math.sqrt(p.x * p.x + p.y * p.y + p.z * p.z)
 		local alt = r - (info.bodyRadius or 0)
@@ -190,11 +196,16 @@ function TechController:_checkMilestones(state, info)
 		reportIf(self, alt > 25000, "alt25k")
 		reportIf(self, alt > Config.ATMOSPHERE.top, "space")
 		-- Stable orbit: periapsis clears the atmosphere (won't reenter).
-		local ro = Orbit.getReadout(state, info.mu)
-		if ro and ro.periapsis and (ro.periapsis - (info.bodyRadius or 0)) > Config.ATMOSPHERE.top then
-			reportIf(self, true, "orbit")
+		if not R.orbit then
+			local ro = Orbit.getReadout(state, info.mu)
+			if ro and ro.periapsis and (ro.periapsis - (info.bodyRadius or 0)) > Config.ATMOSPHERE.top then
+				reportIf(self, true, "orbit")
+			end
 		end
 	elseif bodyId == "moon" then
+		if R.munSOI and R.munLand then
+			return
+		end
 		reportIf(self, true, "munSOI")
 		reportIf(self, info.status == "Landed", "munLand")
 	elseif bodyId == "sun" then

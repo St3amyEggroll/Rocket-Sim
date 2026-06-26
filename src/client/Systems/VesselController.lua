@@ -211,8 +211,14 @@ function VesselController:_render(state, info)
 	if not info then
 		return
 	end
-	local flying = info.mode == "Flight" and not info.mapMode and not info.isMenu
 	self:_refreshHUDVis()
+	-- Vessels only matter during a flight. In the VAB / Research / EVA / menu cinematic there's
+	-- nothing to render or target, so skip the per-vessel Kepler propagation entirely.
+	if info.mode ~= "Flight" or info.isMenu then
+		return
+	end
+	-- The real-scale vessel models only show outside the map view; target data stays live in both.
+	local flying = not info.mapMode
 
 	local mt = info.missionTime or 0
 	for _, v in ipairs(self._vessels) do

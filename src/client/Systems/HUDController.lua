@@ -157,8 +157,20 @@ function HUDController:_update(state, info)
 	-- with landing; sea-level altitude/apsides remain relative to the datum.
 	local p = state.position
 	local rMag = math.sqrt(p.x * p.x + p.y * p.y + p.z * p.z)
-	-- The moon is a smooth sphere (no terrain field); Terra uses the heightfield.
-	local surfaceR = (info.bodyId == "moon") and info.bodyRadius or Planet.radiusForSim(p)
+	-- The moon is a smooth sphere (no terrain field); Terra uses the heightfield. The terrain
+	-- height under the craft (a multi-octave Perlin sample) changes slowly, so cache it at ~10 Hz
+	-- instead of sampling every frame -- rMag still updates smoothly so the readout stays live.
+	local surfaceR
+	if info.bodyId == "moon" then
+		surfaceR = info.bodyRadius
+	else
+		local now = os.clock()
+		if not self._surfAt or (now - self._surfAt) > 0.1 then
+			self._surfAt = now
+			self._surfR = Planet.radiusForSim(p)
+		end
+		surfaceR = self._surfR or Planet.radiusForSim(p)
+	end
 	local radarAlt = rMag - surfaceR
 	local vertSpeed = 0
 	if rMag > 1e-6 then

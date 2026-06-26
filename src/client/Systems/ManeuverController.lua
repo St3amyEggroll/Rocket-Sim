@@ -213,7 +213,9 @@ function ManeuverController:_shiftNode(dir)
 end
 
 -- Predict the post-burn orbit from the live state. Returns nil when there's no (future) node.
-function ManeuverController:_predict(state, mu, mt)
+-- The full 90-point sampled path is ONLY needed by the map view, so it's sampled only when
+-- withPath is true; the navball burn marker just needs `dv`, computed cheaply every frame.
+function ManeuverController:_predict(state, mu, mt, withPath)
 	local node = self._node
 	if not node then
 		return nil
@@ -239,7 +241,7 @@ function ManeuverController:_predict(state, mu, mt)
 		dv = dv,
 		dvMag = dv.Magnitude,
 		dt = dt,
-		path = Orbit.sampleOrbitPath(postState, mu, Config.ORBITLINE.segments),
+		path = withPath and Orbit.sampleOrbitPath(postState, mu, Config.ORBITLINE.segments) or nil,
 	}
 end
 
@@ -266,9 +268,11 @@ function ManeuverController:_update(state, info)
 		return
 	end
 
-	self._pred = self:_predict(state, info.mu, info.missionTime or 0)
-
 	local mapMode = info.mapMode == true
+	-- Sample the full predicted path only in map view (where it's drawn); out of map view the
+	-- navball only needs the burn direction, so skip ~90 Kepler propagations per frame.
+	self._pred = self:_predict(state, info.mu, info.missionTime or 0, mapMode)
+
 	self._gui.Enabled = mapMode
 	self._hgui.Enabled = mapMode and self._pred ~= nil
 

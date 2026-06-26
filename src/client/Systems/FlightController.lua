@@ -443,9 +443,13 @@ function FlightController:_fire(extra)
 	extra.nose = self._attitude.LookVector
 	extra.attitude = self._attitude
 	extra.mapMode = self._input:GetMapMode()
-	local mapScale, mapFrame = self:_mapInfo()
-	extra.mapScale = mapScale
-	extra.mapFrameRadius = mapFrame
+	-- The map scale/frame (an Orbit.getReadout) is only consumed by the map view, so skip the
+	-- computation entirely when the map isn't open.
+	if extra.mapMode then
+		local mapScale, mapFrame = self:_mapInfo()
+		extra.mapScale = mapScale
+		extra.mapFrameRadius = mapFrame
+	end
 	extra.mu = self._mu
 	extra.bodyRadius = self._bodyRadius
 	-- Patched-conic context: the active body's Terra-centric centre/velocity (so the

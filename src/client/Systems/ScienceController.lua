@@ -61,12 +61,42 @@ function ScienceController:Start()
 	self:_build(Players.LocalPlayer:WaitForChild("PlayerGui"))
 
 	self._mode.ModeChanged:Connect(function()
+		self._ctx = nil
+		self._ctxAt = nil -- recompute the situation immediately on the next flight frame
 		self:_refresh()
 	end)
 	Flight:GetUpdatedSignal():Connect(function(state, info)
-		self._ctx = (info and info.mode == "Flight" and info.status ~= "Crashed") and Situations.of(state, info) or nil
-		self:_refresh()
+		self:_tick(state, info)
 	end)
+end
+
+-- The situation (body/biome/situation) only changes when you cross an altitude band or biome,
+-- which is rare. Classifying it calls a multi-octave Perlin biome sample, so do it at ~5 Hz
+-- instead of every frame, and only rebuild the widget when one of the fields actually changes.
+function ScienceController:_tick(state, info)
+	local flying = info and info.mode == "Flight" and info.status ~= "Crashed"
+	if not flying then
+		if self._ctx ~= nil then
+			self._ctx = nil
+			self:_refresh()
+		end
+		return
+	end
+	local now = os.clock()
+	if self._ctxAt and (now - self._ctxAt) < 0.2 then
+		return
+	end
+	self._ctxAt = now
+	local ctx = Situations.of(state, info)
+	local prev = self._ctx
+	local changed = (prev == nil)
+		or prev.body ~= ctx.body
+		or prev.biome ~= ctx.biome
+		or prev.situation ~= ctx.situation
+	self._ctx = ctx
+	if changed then
+		self:_refresh()
+	end
 end
 
 function ScienceController:_build(pg)
