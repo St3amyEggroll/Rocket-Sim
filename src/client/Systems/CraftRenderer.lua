@@ -457,7 +457,12 @@ function CraftRenderer:_explode(at)
 	ex.Position = at
 	ex.BlastRadius = 34
 	ex.BlastPressure = 600000 -- fling the debris apart
-	ex.DestroyJointsOnExplode = false -- don't ragdoll the player's avatar
+	-- Don't ragdoll the player's avatar. DestroyJointsOnExplode is absent in some Studio
+	-- builds (assigning it throws there), so set it defensively -- a missing property must
+	-- not abort the crash FX from inside the signal handler.
+	pcall(function()
+		ex.DestroyJointsOnExplode = false
+	end)
 	ex.Parent = Workspace
 end
 

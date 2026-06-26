@@ -29,6 +29,8 @@ local store
 local remotes
 local active = {} -- [userId] = slot number currently loaded (nil = none)
 local profiles = {} -- [userId] = the active profile table
+local dirty = {} -- [userId] = true when the profile changed since the last DataStore write
+local SAVE_INTERVAL = 7 -- s between writes to one key (DataStore throttles same-key writes ~6s)
 
 local function slotKey(userId, slot)
 	return ("save_v1_%d_%d"):format(userId, slot)
@@ -99,9 +101,21 @@ local function pushState(player)
 	end
 end
 
+-- Mark the active profile changed. A background loop coalesces these into one write every
+-- SAVE_INTERVAL, so rapid-fire progress (several milestones/experiments at once) can't flood
+-- the DataStore queue (which, when full, silently DROPS saves).
 local function saveActive(player)
 	local uid = player.UserId
 	if active[uid] and profiles[uid] then
+		dirty[uid] = true
+	end
+end
+
+-- Immediate, blocking write -- used where we can't wait for the next flush: slot creation,
+-- the player leaving, and server shutdown.
+local function flushNow(uid)
+	if active[uid] and profiles[uid] then
+		dirty[uid] = nil
 		profiles[uid].updated = os.time()
 		writeSlot(uid, active[uid], profiles[uid])
 	end
@@ -146,7 +160,7 @@ local function onNew(player, slot, name)
 	local uid = player.UserId
 	profiles[uid] = defaultProfile(type(name) == "string" and name ~= "" and name or ("Save " .. slot))
 	active[uid] = slot
-	saveActive(player)
+	flushNow(uid) -- persist the new slot now so ListSaves sees it immediately
 	pushState(player)
 	return true
 end
@@ -371,14 +385,33 @@ function SaveServer.start()
 		pushState(player) -- client re-request (covers a late client)
 	end)
 
+	-- Coalesced writer: at most one DataStore write per key per SAVE_INTERVAL. Snapshot the
+	-- dirty set first (writeSlot yields, and adding keys mid-pairs() is undefined); clear each
+	-- flag before writing so a change during the write is caught on the next pass.
+	task.spawn(function()
+		while true do
+			task.wait(SAVE_INTERVAL)
+			local pending = {}
+			for uid in pairs(dirty) do
+				pending[#pending + 1] = uid
+			end
+			for _, uid in ipairs(pending) do
+				if dirty[uid] then
+					flushNow(uid)
+				end
+			end
+		end
+	end)
+
 	Players.PlayerRemoving:Connect(function(player)
-		saveActive(player)
+		flushNow(player.UserId)
 		active[player.UserId] = nil
 		profiles[player.UserId] = nil
+		dirty[player.UserId] = nil
 	end)
 	game:BindToClose(function()
 		for _, player in ipairs(Players:GetPlayers()) do
-			saveActive(player)
+			flushNow(player.UserId)
 		end
 	end)
 end
