@@ -216,6 +216,15 @@ function StagingController:_render()
 	for s = 1, stageCount do
 		self:_makeRow(s, contents[s] or {}, current, stageCount)
 	end
+
+	-- "+ Add stage" reflects the 10-stage cap while building.
+	if self._editable and self._action then
+		local canAdd = self._vehicle:CanAddStage()
+		self._action.Active = canAdd
+		self._action.AutoButtonColor = canAdd
+		self._action.Text = canAdd and "+ Add stage" or ("Max " .. self._vehicle:GetMaxStages() .. " stages")
+		self._action.BackgroundColor3 = canAdd and ROW or Color3.fromRGB(46, 38, 38)
+	end
 end
 
 function StagingController:_makeRow(stage, chips, current, stageCount)
@@ -435,7 +444,8 @@ function StagingController:_dropChip()
 		end
 	end
 	if not target and inRect(m, self._action) then
-		target = self._vehicle:GetStageCount() + 1 -- dropped on "+ Add stage": new stage
+		-- dropped on "+ Add stage": new stage, but never past the cap.
+		target = math.min(self._vehicle:GetStageCount() + 1, self._vehicle:GetMaxStages())
 	end
 	self:_cancelDrag()
 	if target then

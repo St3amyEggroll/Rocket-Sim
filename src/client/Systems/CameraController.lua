@@ -38,6 +38,7 @@ function CameraController:Start()
 	self._input = Registry:Get("InputController")
 	self._origin = Registry:Get("FloatingOriginController")
 	self._vehicle = Registry:Get("VehicleController")
+	self._vab = Registry:Get("VABController")
 	self._flight = Registry:Get("FlightController")
 	self._eva = Registry:Get("EVAController")
 	local Flight = self._flight
@@ -124,7 +125,10 @@ function CameraController:_update(state, info)
 		local L = frameFromUp(base, upV)
 		local h = self._vehicle:GetHeight()
 		-- Frame the actual parts (so a free-floating anchor stays in view), not just the pad.
-		local target = L:PointToWorldSpace(self._vehicle:GetBuildCenter())
+		-- Use the build controller's frozen-during-drag centre so picking a part up doesn't
+		-- pan the camera and throw off where the part lands.
+		local center = self._vab and self._vab:GetBuildCenter() or self._vehicle:GetBuildCenter()
+		local target = L:PointToWorldSpace(center)
 		local cosE = math.cos(orbit.elevation)
 		-- Orbit direction in the launch frame, so elevation is measured off the pad's "up".
 		local dir = L:VectorToWorldSpace(Vector3.new(

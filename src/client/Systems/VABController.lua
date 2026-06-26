@@ -511,12 +511,22 @@ function VABController:_makeGhost(def)
 	return ghost
 end
 
+-- Build centre used while framing the camera and projecting the drop plane. Frozen at the
+-- moment a drag begins: picking a placed part up REMOVES it (and its symmetric copies), which
+-- would shift the craft's bounding-box centre -- panning the VAB camera and sliding the drop
+-- plane out from under the cursor, so the part never lands where you released it. Holding the
+-- centre fixed for the whole drag keeps the rest of the craft still and placement accurate.
+function VABController:GetBuildCenter()
+	return self._frozenCenter or self._vehicle:GetBuildCenter()
+end
+
 function VABController:_beginDragNew(id)
 	local def = Catalog.get(id)
 	if not def then
 		return
 	end
 	self:_cancelDrag(false)
+	self._frozenCenter = self._vehicle:GetBuildCenter()
 	self._drag = { id = id, def = def, ghost = self:_makeGhost(def), pod = (def.shape == "pod") }
 	self._selected = nil
 	self:_updatePartPanel()
@@ -529,6 +539,8 @@ function VABController:_beginDragExisting(index)
 		return
 	end
 	self:_cancelDrag(false)
+	-- Freeze the craft's framing BEFORE the pickup removes parts (see GetBuildCenter).
+	self._frozenCenter = self._vehicle:GetBuildCenter()
 
 	-- Blueprint of the grabbed part + its WHOLE subtree (the tank/engine on it), relative
 	-- to the root (parents are listed before children, so links rebuild cleanly).
@@ -589,6 +601,7 @@ function VABController:_cancelDrag(restore)
 	end
 	self._drag = nil
 	self._snap = nil
+	self._frozenCenter = nil
 	if self._node then
 		self._node.Transparency = 1
 	end
@@ -617,6 +630,7 @@ function VABController:_onRelease()
 	d.ghost:Destroy()
 	self._drag = nil
 	self._snap = nil
+	self._frozenCenter = nil
 	if self._node then
 		self._node.Transparency = 1
 	end
@@ -671,7 +685,7 @@ end
 -- on screen in 3D, off the rocket). Returns a build-space CFrame.
 function VABController:_freePlane()
 	local bo, bd, camLook = self:_buildRay()
-	return CFrame.new(self:_planePoint(bo, bd, self._vehicle:GetBuildCenter(), camLook))
+	return CFrame.new(self:_planePoint(bo, bd, self:GetBuildCenter(), camLook))
 end
 
 -- Snap a horizontal direction to the nearest 15 degrees (angle snap, in snap mode).
@@ -766,7 +780,7 @@ end
 function VABController:_snapTarget()
 	local d = self._drag
 	local bo, bd, camLook = self:_buildRay()
-	local desired = self:_planePoint(bo, bd, self._vehicle:GetBuildCenter(), camLook)
+	local desired = self:_planePoint(bo, bd, self:GetBuildCenter(), camLook)
 
 	if not self._snapMode then
 		return CFrame.new(desired), nil, nil, false

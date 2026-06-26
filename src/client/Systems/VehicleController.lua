@@ -33,6 +33,8 @@ local Catalog = require(Shared:WaitForChild("PartCatalog"))
 
 local VehicleController = {}
 
+local MAX_STAGES = 10 -- hard cap on how many stages a craft can have
+
 local function isDecoupler(def)
 	return def ~= nil and def.decoupler == true
 end
@@ -234,7 +236,7 @@ function VehicleController:_assignStages()
 	if self._autoStage then
 		for rank, g in ipairs(order) do
 			for _, idx in ipairs(g.members) do
-				parts[idx].stage = rank
+				parts[idx].stage = math.min(rank, MAX_STAGES)
 			end
 		end
 	else
@@ -256,9 +258,9 @@ function VehicleController:_assignStages()
 								rank += 1
 							end
 						end
-						existing = rank
+						existing = math.min(rank, MAX_STAGES)
 					end
-					parts[idx].stage = existing
+					parts[idx].stage = math.min(existing, MAX_STAGES)
 				end
 			end
 		end
@@ -647,8 +649,10 @@ local function partKind(def)
 	return "decoupler"
 end
 
--- For the staging panel: actuators grouped by stage, then by part id (symmetry copies
--- collapse into one chip carrying a count + every copy's index).
+-- For the staging panel: actuators grouped by stage. Only TRUE symmetry copies collapse
+-- into one chip (same symmetry family + same part), so a mirrored booster pair reads as one
+-- movable chip. Two separately-placed identical parts each get their OWN chip -- that's what
+-- lets you drag one out of a stage without dragging the other with it.
 function VehicleController:GetStageContents()
 	local out = {}
 	for s = 1, (self._stageCount or 0) do
@@ -658,11 +662,14 @@ function VehicleController:GetStageContents()
 		if isActuator(p.def) and p.stage then
 			local s = math.clamp(p.stage, 1, math.max(self._stageCount or 1, 1))
 			out[s] = out[s] or {}
+			local symA = self:_symAncestorId(i)
 			local group
-			for _, g in ipairs(out[s]) do
-				if g.id == p.id then
-					group = g
-					break
+			if symA then
+				for _, g in ipairs(out[s]) do
+					if g.symId == symA and g.id == p.id then
+						group = g
+						break
+					end
 				end
 			end
 			if group then
@@ -670,7 +677,7 @@ function VehicleController:GetStageContents()
 				group.indices[#group.indices + 1] = i
 			else
 				out[s][#out[s] + 1] =
-					{ id = p.id, def = p.def, kind = partKind(p.def), count = 1, indices = { i } }
+					{ id = p.id, def = p.def, kind = partKind(p.def), count = 1, indices = { i }, symId = symA }
 			end
 		end
 	end
@@ -679,7 +686,7 @@ end
 
 function VehicleController:SetPartsStage(indices, stage)
 	self._autoStage = false
-	stage = math.max(1, math.floor(stage))
+	stage = math.clamp(math.floor(stage), 1, MAX_STAGES)
 	for _, i in ipairs(indices) do
 		local p = self._parts[i]
 		if p and isActuator(p.def) then
@@ -712,9 +719,18 @@ function VehicleController:SwapStages(a, b)
 	self:_recompute()
 end
 
+-- True if another (empty) stage can still be added (we cap at MAX_STAGES).
+function VehicleController:CanAddStage(): boolean
+	return self:_maxStage() < MAX_STAGES
+end
+
+function VehicleController:GetMaxStages(): number
+	return MAX_STAGES
+end
+
 function VehicleController:AddStage()
 	self._autoStage = false
-	self._stageFloor = math.max(self._stageFloor or 0, self:_maxStage()) + 1
+	self._stageFloor = math.min(MAX_STAGES, math.max(self._stageFloor or 0, self:_maxStage()) + 1)
 	self:_recompute()
 end
 
